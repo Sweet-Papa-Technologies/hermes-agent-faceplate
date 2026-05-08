@@ -1,65 +1,75 @@
-import { app, BrowserWindow } from 'electron';
-import path from 'path';
-import os from 'os';
-import { fileURLToPath } from 'url'
+// Faceplate main-process entry. Boots a tray-only app with one avatar window
+// (overlay or windowed per settings) and an on-demand settings window.
 
-// needed in case process is undefined under Linux
-const platform = process.platform || os.platform();
+import { app } from 'electron';
+import os from 'node:os';
 
-const currentDir = fileURLToPath(new URL('.', import.meta.url));
+import { applyPatch, getSettings, registerSettingsIpc } from './settings-store';
+import {
+  createAvatarWindow,
+  isWayland,
+  registerWindowIpc,
+} from './window';
+import {
+  registerAllFromSettings,
+  registerHotkeysIpc,
+  unregisterAll,
+} from './shortcuts';
+import { createTray, destroyTray, hideDockOnMacOs, rebuildMenu } from './tray';
+import { registerThemesIpc } from './themes-store';
 
-let mainWindow: BrowserWindow | undefined;
-
-async function createWindow() {
-  /**
-   * Initial window options
-   */
-  mainWindow = new BrowserWindow({
-    icon: path.resolve(currentDir, 'icons/icon.png'), // tray icon
-    width: 1000,
-    height: 600,
-    useContentSize: true,
-    webPreferences: {
-      contextIsolation: true,
-      // More info: https://v2.quasar.dev/quasar-cli-vite/developing-electron-apps/electron-preload-script
-      preload: path.resolve(
-        currentDir,
-        path.join(process.env.QUASAR_ELECTRON_PRELOAD_FOLDER, 'electron-preload' + process.env.QUASAR_ELECTRON_PRELOAD_EXTENSION)
-      ),
-    },
-  });
-
-  if (process.env.DEV) {
-    await mainWindow.loadURL(process.env.APP_URL);
-  } else {
-    await mainWindow.loadFile('index.html');
+// Linux/Wayland: if the user has explicitly opted into "Force X11", the switch
+// must be set BEFORE app.whenReady(). Settings are read synchronously here.
+function applyEarlyPlatformFlags(): void {
+  if (process.platform === 'linux' && isWayland()) {
+    if (getSettings().linux.force_x11) {
+      app.commandLine.appendSwitch('ozone-platform', 'x11');
+    }
   }
-
-  if (process.env.DEBUGGING) {
-    // if on DEV or Production with debug enabled
-    mainWindow.webContents.openDevTools();
-  } else {
-    // we're on production; no access to devtools pls
-    mainWindow.webContents.on('devtools-opened', () => {
-      mainWindow?.webContents.closeDevTools();
-    });
-  }
-
-  mainWindow.on('closed', () => {
-    mainWindow = undefined;
-  });
 }
 
-void app.whenReady().then(createWindow);
+const platform = process.platform || os.platform();
+
+applyEarlyPlatformFlags();
+
+void app.whenReady().then(() => {
+  registerSettingsIpc();
+  registerWindowIpc();
+  registerHotkeysIpc();
+  registerThemesIpc();
+
+  // First-run side effect: on Wayland with no explicit user override,
+  // promote mode to 'windowed' (addendum #2). One-shot — once the user picks,
+  // we respect it.
+  const s = getSettings();
+  if (
+    process.platform === 'linux' &&
+    isWayland() &&
+    s.avatar.mode === 'overlay' &&
+    !s.linux.force_x11
+  ) {
+    applyPatch({ avatar: { mode: 'windowed' } });
+  }
+
+  hideDockOnMacOs();
+  createTray();
+  createAvatarWindow();
+  registerAllFromSettings();
+  rebuildMenu();
+});
 
 app.on('window-all-closed', () => {
+  // Tray-only on macOS — keep the app alive when both windows are closed.
   if (platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('activate', () => {
-  if (mainWindow === undefined) {
-    void createWindow();
-  }
+  createAvatarWindow();
+});
+
+app.on('will-quit', () => {
+  unregisterAll();
+  destroyTray();
 });

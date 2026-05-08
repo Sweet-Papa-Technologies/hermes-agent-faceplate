@@ -1,1 +1,25 @@
-// app global css
+// Global styles. Mode-aware backgrounds + a tiny reset for the overlay window.
+
+:root[data-mode='overlay'] {
+  --faceplate-bg: transparent;
+  --faceplate-card: none;
+}
+
+:root[data-mode='windowed'] {
+  --faceplate-bg: #1a1a1a;
+  --faceplate-card: drop-shadow(0 12px 32px rgba(0, 0, 0, 0.35));
+}
+
+html, body, #q-app {
+  margin: 0;
+  padding: 0;
+  background: var(--faceplate-bg, transparent);
+  color-scheme: dark;
+}
+
+// In overlay mode, scrollbars must never appear — the window is sized to the
+// avatar exactly.
+:root[data-mode='overlay'] html,
+:root[data-mode='overlay'] body {
+  overflow: hidden;
+}

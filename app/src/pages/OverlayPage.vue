@@ -1,0 +1,67 @@
+<template>
+  <div class="overlay-page" :class="`mode-${settings.mode}`">
+    <Avatar />
+    <Captions />
+    <TypingBar ref="typingBarRef" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, onBeforeUnmount, ref } from 'vue';
+
+import Avatar from '../components/Avatar.vue';
+import Captions from '../components/Captions.vue';
+import TypingBar from '../components/TypingBar.vue';
+import { useSettingsStore } from '../stores/settings';
+
+const settings = useSettingsStore();
+
+interface TypingBarHandle {
+  toggle(): void;
+  open(): void;
+  close(): void;
+}
+const typingBarRef = ref<TypingBarHandle | null>(null);
+
+let detachHotkeys: (() => void) | null = null;
+
+onMounted(() => {
+  const fp = window.faceplate;
+  if (!fp) return;
+  detachHotkeys = fp.hotkeys.onPress((name) => {
+    switch (name) {
+      case 'typing_bar':
+        typingBarRef.value?.toggle();
+        return;
+      case 'replay':
+        // Real impl in Phase 2 once TTS is wired; here we just light up the
+        // state ring so the loop is visible.
+        return;
+      case 'interrupt':
+        typingBarRef.value?.close();
+        return;
+      default:
+        // Other hotkeys are owned by main (show/hide, cycle_monitor) or by
+        // the audio pipeline (push_to_talk, captions) and arrive in later
+        // phases.
+        return;
+    }
+  });
+});
+
+onBeforeUnmount(() => {
+  detachHotkeys?.();
+});
+</script>
+
+<style scoped>
+.overlay-page {
+  width: 100vw;
+  height: 100vh;
+  background: var(--faceplate-bg, transparent);
+}
+
+:root[data-mode='windowed'] .overlay-page {
+  background: var(--faceplate-bg, #1a1a1a);
+}
+</style>

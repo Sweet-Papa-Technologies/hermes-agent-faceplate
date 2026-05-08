@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "default-svg",
+  "name": "Default SVG Hermes",
+  "author": "HermesAgent Faceplate",
+  "license": "MIT",
+  "canvas": { "width": 256, "height": 256, "bg": "transparent" },
+  "layers": {
+    "head": { "src": "head.svg" },
+    "state_ring": {
+      "src": "ring.svg",
+      "tint_per_state": {
+        "idle": "#a4a4a4",
+        "listening": "#06b6d4",
+        "thinking": "#f59e0b",
+        "speaking": "#22c55e",
+        "error": "#ef4444"
+      }
+    }
+  },
+  "visemes": {
+    "A": "<g id=\"viseme-A\"><ellipse cx=\"128\" cy=\"178\" rx=\"22\" ry=\"19\" fill=\"#3a1d10\"/><ellipse cx=\"128\" cy=\"175\" rx=\"18\" ry=\"14\" fill=\"#1a0d08\"/></g>",
+    "B": "<g id=\"viseme-B\"><ellipse cx=\"128\" cy=\"178\" rx=\"19\" ry=\"11\" fill=\"#3a1d10\"/><ellipse cx=\"128\" cy=\"176\" rx=\"15\" ry=\"7\" fill=\"#1a0d08\"/></g>",
+    "C": "<g id=\"viseme-C\"><ellipse cx=\"128\" cy=\"178\" rx=\"10\" ry=\"13\" fill=\"#3a1d10\"/><ellipse cx=\"128\" cy=\"177\" rx=\"7\" ry=\"10\" fill=\"#1a0d08\"/></g>",
+    "D": "<g id=\"viseme-D\"><rect x=\"104\" y=\"172\" width=\"48\" height=\"7\" rx=\"3.5\" fill=\"#3a1d10\"/><rect x=\"108\" y=\"174\" width=\"40\" height=\"3\" rx=\"1.5\" fill=\"#1a0d08\"/></g>",
+    "E": "<g id=\"viseme-E\"><rect x=\"110\" y=\"176\" width=\"36\" height=\"3\" rx=\"1.5\" fill=\"#3a1d10\"/></g>",
+    "F": "<g id=\"viseme-F\"><rect x=\"112\" y=\"175\" width=\"32\" height=\"5\" rx=\"2\" fill=\"#3a1d10\"/><line x1=\"110\" y1=\"172\" x2=\"146\" y2=\"172\" stroke=\"#f5f1e6\" stroke-width=\"1.2\"/></g>",
+    "X": "<g id=\"viseme-X\"><line x1=\"110\" y1=\"178\" x2=\"146\" y2=\"178\" stroke=\"#3a1d10\" stroke-width=\"3\" stroke-linecap=\"round\"/></g>"
+  },
+  "captions": {
+    "font_family": "Inter, system-ui, sans-serif",
+    "font_size_px": 16,
+    "color": "#ffffff",
+    "background": "rgba(0,0,0,0.55)",
+    "align": "center",
+    "bottom_offset_px": 24
+  }
+}

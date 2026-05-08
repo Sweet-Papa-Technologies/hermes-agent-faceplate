@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <radialGradient id="head-fill" cx="50%" cy="42%" r="55%">
+      <stop offset="0%" stop-color="#f5f1e6" />
+      <stop offset="100%" stop-color="#cdb98a" />
+    </radialGradient>
+    <radialGradient id="cheek-fill" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8a48a" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#e8a48a" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <g id="head">
+    <ellipse cx="128" cy="130" rx="78" ry="86" fill="url(#head-fill)" stroke="#3a2a14" stroke-width="2" />
+    <ellipse cx="92" cy="158" rx="14" ry="9" fill="url(#cheek-fill)" />
+    <ellipse cx="164" cy="158" rx="14" ry="9" fill="url(#cheek-fill)" />
+    <g id="eyes">
+      <ellipse cx="100" cy="120" rx="6" ry="8" fill="#1c140a" />
+      <ellipse cx="156" cy="120" rx="6" ry="8" fill="#1c140a" />
+      <circle cx="98" cy="117" r="2" fill="#fff" />
+      <circle cx="154" cy="117" r="2" fill="#fff" />
+    </g>
+    <path d="M104,108 Q112,102 120,108" stroke="#3a2a14" stroke-width="2.5" fill="none" stroke-linecap="round" />
+    <path d="M136,108 Q144,102 152,108" stroke="#3a2a14" stroke-width="2.5" fill="none" stroke-linecap="round" />
+  </g>
+</svg>
