@@ -32,6 +32,12 @@ export interface HermesDiscovery {
 
 export type ConnectionTarget = 'agent' | 'llm' | 'tts' | 'asr' | 'paraphrase';
 
+export interface ParaphraseResult {
+  text: string;
+  used: 'reuse_hermes_llm' | 'sidecar_fallback' | 'disabled' | 'skipped';
+  latency_ms: number;
+}
+
 export interface TestResult {
   ok: boolean;
   latency_ms: number;
@@ -75,6 +81,7 @@ export interface FaceplatePreload {
   hermes: {
     discoverConfig(): Promise<HermesDiscovery>;
     testConnection(target: ConnectionTarget): Promise<TestResult>;
+    paraphrase(text: string): Promise<ParaphraseResult>;
   };
   window: {
     setClickThrough(enabled: boolean): Promise<void>;
@@ -82,6 +89,7 @@ export interface FaceplatePreload {
     cycleMonitor(): Promise<void>;
     showHide(state?: ShowHideState): Promise<void>;
     setMode(mode: 'overlay' | 'windowed'): Promise<void>;
+    moveBy(dx: number, dy: number): Promise<void>;
   };
   hotkeys: {
     register(name: HotkeyName, accelerator: string): Promise<RegisterResult>;
@@ -127,6 +135,7 @@ export const IPC = {
   hermes: {
     discover: 'faceplate:hermes:discover',
     test: 'faceplate:hermes:test',
+    paraphrase: 'faceplate:hermes:paraphrase',
   },
   window: {
     setClickThrough: 'faceplate:window:set-click-through',
@@ -134,6 +143,7 @@ export const IPC = {
     cycleMonitor: 'faceplate:window:cycle-monitor',
     showHide: 'faceplate:window:show-hide',
     setMode: 'faceplate:window:set-mode',
+    moveBy: 'faceplate:window:move-by',
   },
   hotkeys: {
     register: 'faceplate:hotkeys:register',

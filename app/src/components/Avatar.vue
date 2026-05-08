@@ -1,5 +1,9 @@
 <template>
-  <div ref="rootEl" class="avatar-root">
+  <div
+    ref="rootEl"
+    :class="['avatar-root', { 'is-dragging': dragging }]"
+    @mousedown.prevent="onMouseDown"
+  >
     <svg
       v-if="manifest"
       class="avatar-svg"
@@ -83,6 +87,38 @@ watchEffect(() => {
   detachMouse = () => window.removeEventListener('mousemove', onMove);
 });
 
+// Drag-to-move (overlay mode only — windowed mode uses the OS title bar).
+//
+// Drag from anywhere inside the avatar bubble. There are no clickable
+// elements inside the avatar yet; this halo-drag covers the entire shape
+// and avoids the `-webkit-app-region: drag` foot-guns that would also
+// disable click events.
+const dragging = ref(false);
+
+function onMouseDown(e: MouseEvent): void {
+  if (settings.settings.avatar.mode !== 'overlay') return;
+  if (e.button !== 0) return;
+  if (!isInsideAvatar(e.clientX, e.clientY)) return;
+  dragging.value = true;
+  let lastX = e.screenX;
+  let lastY = e.screenY;
+
+  const onMove = (ev: MouseEvent) => {
+    const dx = ev.screenX - lastX;
+    const dy = ev.screenY - lastY;
+    lastX = ev.screenX;
+    lastY = ev.screenY;
+    if (dx !== 0 || dy !== 0) void window.faceplate?.window.moveBy(dx, dy);
+  };
+  const onUp = () => {
+    dragging.value = false;
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
+
 onMounted(() => {
   if (!theme.loaded && settings.loaded) {
     void theme.load(settings.settings.avatar.theme);
@@ -118,5 +154,17 @@ onBeforeUnmount(() => {
 .avatar-loading {
   font: 13px/1 system-ui, sans-serif;
   color: rgba(255, 255, 255, 0.6);
+}
+
+.avatar-root.is-dragging {
+  cursor: grabbing;
+}
+
+.avatar-root {
+  cursor: grab;
+}
+
+:root[data-mode='windowed'] .avatar-root {
+  cursor: default;
 }
 </style>

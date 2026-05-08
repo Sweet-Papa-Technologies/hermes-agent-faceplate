@@ -235,6 +235,18 @@ export function registerWindowIpc(): void {
     applyPatch({ avatar: { mode } });
     recreateAvatarWindow();
   });
+
+  ipcMain.handle(IPC.window.moveBy, (evt: IpcMainInvokeEvent, dx: number, dy: number) => {
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    if (!win || win !== avatarWindow) return;
+    const bounds = win.getBounds();
+    win.setBounds({
+      x: bounds.x + Math.round(dx),
+      y: bounds.y + Math.round(dy),
+      width: bounds.width,
+      height: bounds.height,
+    });
+  });
 }
 
 export function quitAll(): void {

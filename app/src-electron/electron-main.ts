@@ -17,6 +17,9 @@ import {
 } from './shortcuts';
 import { createTray, destroyTray, hideDockOnMacOs, rebuildMenu } from './tray';
 import { registerThemesIpc } from './themes-store';
+import { registerHermesDiscoveryIpc } from './hermes-discovery';
+import { registerHermesTesterIpc } from './hermes-tester';
+import { registerParaphraseIpc } from './paraphrase-bridge';
 
 // Linux/Wayland: if the user has explicitly opted into "Force X11", the switch
 // must be set BEFORE app.whenReady(). Settings are read synchronously here.
@@ -37,6 +40,9 @@ void app.whenReady().then(() => {
   registerWindowIpc();
   registerHotkeysIpc();
   registerThemesIpc();
+  registerHermesDiscoveryIpc();
+  registerHermesTesterIpc();
+  registerParaphraseIpc();
 
   // First-run side effect: on Wayland with no explicit user override,
   // promote mode to 'windowed' (addendum #2). One-shot — once the user picks,

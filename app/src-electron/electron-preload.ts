@@ -34,6 +34,7 @@ const hermes: FaceplatePreload['hermes'] = {
   discoverConfig: () => ipcRenderer.invoke(IPC.hermes.discover),
   testConnection: (target: ConnectionTarget) =>
     ipcRenderer.invoke(IPC.hermes.test, target),
+  paraphrase: (text: string) => ipcRenderer.invoke(IPC.hermes.paraphrase, text),
 };
 
 const win: FaceplatePreload['window'] = {
@@ -45,6 +46,7 @@ const win: FaceplatePreload['window'] = {
   showHide: (state?: ShowHideState) =>
     ipcRenderer.invoke(IPC.window.showHide, state),
   setMode: (mode) => ipcRenderer.invoke(IPC.window.setMode, mode),
+  moveBy: (dx, dy) => ipcRenderer.invoke(IPC.window.moveBy, dx, dy),
 };
 
 const hotkeys: FaceplatePreload['hotkeys'] = {

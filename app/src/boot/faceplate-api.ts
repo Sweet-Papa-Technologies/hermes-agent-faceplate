@@ -8,9 +8,12 @@
 
 import { boot } from 'quasar/wrappers';
 
+import { watch } from 'vue';
+
 import type { FaceplatePreload } from '../../src-electron/preload-api';
 import { useSettingsStore } from '../stores/settings';
 import { useThemeStore } from '../stores/theme';
+import { useDiscoveryStore } from '../stores/discovery';
 import { eventBus, wirePreloadBridge } from './event-bus';
 
 declare global {
@@ -28,4 +31,12 @@ export default boot(async () => {
 
   const theme = useThemeStore();
   await theme.load(settings.settings.avatar.theme);
+
+  const discovery = useDiscoveryStore();
+  await discovery.refresh();
+  // Re-discover when the user edits the hermes config path or base URL.
+  watch(
+    () => [settings.settings.hermes.config_path, settings.settings.hermes.base_url],
+    () => void discovery.refresh(),
+  );
 });
