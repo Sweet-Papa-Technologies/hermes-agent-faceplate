@@ -8,26 +8,36 @@
   "private": true,
   "scripts": {
     "test": "echo \"No test specified\" && exit 0",
-    "dev": "quasar dev",
-    "build": "quasar build",
+    "dev": "quasar dev -m electron",
+    "dev:web": "quasar dev",
+    "build": "quasar build -m electron",
+    "build:web": "quasar build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "postinstall": "quasar prepare"
   },
   "dependencies": {
     "@quasar/extras": "^1.16.4",
+    "dompurify": "^3.2.4",
+    "dotenv": "^16.4.7",
+    "openai": "^4.77.0",
     "pinia": "^3.0.1",
     "quasar": "^2.16.0",
     "vue": "^3.5.22",
     "vue-i18n": "^11.3.0",
-    "vue-router": "^5.0.3"
+    "vue-router": "^5.0.3",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@electron/packager": "^19.1.1",
     "@intlify/unplugin-vue-i18n": "^11.0.0",
     "@quasar/app-vite": "^2.5.1",
     "@types/node": "^22.19.11",
     "autoprefixer": "^10.4.27",
     "electron": "^42.0.0",
-    "typescript": "^5.9.3"
+    "electron-builder": "^25.1.8",
+    "electron-updater": "^6.3.9",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^2.2.0"
   },
   "engines": {
     "node": "^28 || ^26 || ^24 || ^22.12",

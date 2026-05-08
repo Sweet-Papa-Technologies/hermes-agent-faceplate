@@ -185,25 +185,19 @@ export default defineConfig((ctx) => {
       // specify the debugging port to use for the Electron app when running in development mode
       inspectPort: 5858,
 
-      bundler: 'packager', // 'packager' or 'builder'
-
-      packager: {
-        // https://github.com/electron-userland/electron-packager/blob/master/docs/api.md#options
-
-        // OS X / Mac App Store
-        // appBundleId: '',
-        // appCategoryType: '',
-        // osxSign: '',
-        // protocol: 'myapp://path',
-
-        // Windows only
-        // win32metadata: { ... }
-      },
+      bundler: 'builder', // 'packager' or 'builder'
 
       builder: {
         // https://www.electron.build/configuration
-
-        appId: 'hermes-faceplate'
+        appId: 'dev.fofo.hermes-faceplate',
+        productName: 'HermesAgent Faceplate',
+        // Code signing + notarization deferred per build plan.
+        mac: {
+          category: 'public.app-category.productivity'
+        },
+        // Sidecar compose files are bundled into resources/ at package time;
+        // populated when sidecar/ comes online (Phase 5).
+        extraResources: []
       }
     },
 
