@@ -1,0 +1,68 @@
+# Faceplate sidecar — :cpu build (default).
+# Bundles Piper + faster-whisper int8 + openWakeWord + LiteRT-LM.
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/models/hf
+
+# System deps:
+#   ffmpeg     — TTS PCM → MP3 / Opus muxing
+#   curl       — healthcheck + bootstrap downloads
+#   nodejs     — required to run the litert-lm-api-server wrapper
+#   git        — pip install of HF deps that need git
+#   openssl    — entrypoint random token
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        curl \
+        ca-certificates \
+        nodejs \
+        npm \
+        git \
+        openssl \
+        libxml2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ----------------------------------------------------------------- Python
+WORKDIR /app
+COPY pyproject.toml ./
+RUN pip install --upgrade pip && pip install .
+COPY faceplate_sidecar/ /app/faceplate_sidecar/
+# Re-install in editable mode so subsequent code edits take effect on a
+# `docker compose restart`. --no-deps keeps the layer thin (deps are pinned
+# by the previous step).
+RUN pip install --no-deps -e .
+
+# ----------------------------------------------------------------- LiteRT-LM
+# Pulled at image build time. The actual model weights are downloaded on
+# first run (cached in /models/litert-lm via volume mount).
+ARG LITERT_LM_API_SERVER_REF=v0.3.0
+RUN git clone --depth 1 --branch "${LITERT_LM_API_SERVER_REF}" \
+      https://github.com/imertz/litert-lm-api-server.git \
+      /opt/litert-lm-api-server \
+    && cd /opt/litert-lm-api-server \
+    && npm install --omit=dev
+
+# litert_lm_main binary — downloaded as a release artifact from the official
+# litert-lm GitHub releases. Version pinned for reproducibility.
+ARG LITERT_LM_BINARY_VERSION=0.7.3
+RUN mkdir -p /opt/litert-lm \
+    && curl -fsSL "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v${LITERT_LM_BINARY_VERSION}/litert_lm_main_linux_x86_64" \
+       -o /opt/litert-lm/litert_lm_main \
+    && chmod +x /opt/litert-lm/litert_lm_main
+
+# ----------------------------------------------------------------- Defaults
+COPY config.example.yaml /etc/faceplate-sidecar/config.yaml
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV FACEPLATE_BUILD=cpu
+
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -125,6 +125,11 @@ async function* consumeEvents(
       for (const evt of events) {
         const parsed = parseSseEvent(evt);
         if (!parsed) continue;
+        // Untagged `[DONE]` (OpenAI-style sentinel) terminates the stream
+        // even when no `event: done` tag is sent — without this the loop
+        // can deadlock on servers that keep the connection open after
+        // the final chunk.
+        if (parsed.data === '[DONE]') return;
         yield* mapEvent(parsed);
         if (parsed.event === 'final' || parsed.event === 'done' || parsed.event === 'error') {
           return;

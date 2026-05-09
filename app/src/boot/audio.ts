@@ -8,6 +8,7 @@
 // turn-handler events are still cross-window via the preload bridge.
 
 import { boot } from 'quasar/wrappers';
+import { Notify } from 'quasar';
 import { watch } from 'vue';
 
 import { useSettingsStore } from '../stores/settings';
@@ -16,10 +17,10 @@ import { startWakeClient, stopWakeClient } from '../audio/wake-client';
 import { attachTurnHandler, interrupt as interruptTurn } from '../hermes/turn-handler';
 
 export default boot(({ router }) => {
-  // Only run on the avatar window; other windows can route through the
-  // event bus but don't need their own pipeline.
+  // Only run on the avatar / test windows; other windows can route through
+  // the event bus but don't need their own pipeline.
   const path = router.currentRoute.value.path;
-  if (path === '/settings') return;
+  if (path === '/settings' || path === '/wizard') return;
 
   attachTurnHandler();
   attachPttController();
@@ -33,12 +34,30 @@ export default boot(({ router }) => {
       } else if (mode !== 'wake_word' && prev === 'wake_word') {
         stopWakeClient();
       }
+      // Show the mic-always-on banner once, no matter where the toggle
+      // happens (Settings, wizard, tray menu, programmatic edit).
+      if (
+        prev === 'off' &&
+        mode !== 'off' &&
+        !settings.settings.privacy.mic_warning_shown
+      ) {
+        void settings.patch({ privacy: { mic_warning_shown: true } });
+        Notify.create({
+          type: 'warning',
+          icon: 'mic',
+          message: 'Microphone will open whenever this mode is active. The avatar\'s halo shows a green LED while the mic is live.',
+          timeout: 8000,
+          position: 'top',
+        });
+      }
     },
     { immediate: true },
   );
 
-  // Hook the global hotkey for interrupt. It's also handled by ptt-controller
-  // for cancelling a recording session; we forward to the turn handler too.
+  // The interrupt hotkey has TWO concurrent handlers, intentionally:
+  //   - ptt-controller cancels a live ASR recording session (if any).
+  //   - here, the turn handler aborts the in-flight chat/TTS turn.
+  // Both no-op if there's nothing to do, so they compose cleanly.
   const fp = window.faceplate;
   if (fp) {
     fp.hotkeys.onPress((name) => {

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="text" class="captions">
+  <div v-if="visible && text" class="captions">
     <span class="captions-text">{{ text }}</span>
   </div>
 </template>
@@ -13,9 +13,10 @@ import { useThemeStore } from '../stores/theme';
 
 const convo = useConversationStore();
 const theme = useThemeStore();
-const { captionText } = storeToRefs(convo);
+const { captionText, captionsVisible } = storeToRefs(convo);
 
 const text = computed(() => captionText.value);
+const visible = computed(() => captionsVisible.value);
 const fontFamily = computed(() => theme.loaded?.manifest.captions?.font_family ?? 'Inter, system-ui, sans-serif');
 const fontSize = computed(() => `${theme.loaded?.manifest.captions?.font_size_px ?? 16}px`);
 const color = computed(() => theme.loaded?.manifest.captions?.color ?? '#ffffff');

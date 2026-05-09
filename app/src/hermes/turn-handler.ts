@@ -21,6 +21,7 @@ import { startRun, type RunHandle, type RunsEndpoint } from './runs-client';
 import { paraphrase } from './paraphrase';
 import { speakStream, type SpeakHandle } from '../audio/tts-client';
 import { startVisemeDriver, type DriverHandle } from '../audio/viseme-driver';
+import { suspendAudio, resumeAudio } from '../audio/audio-context';
 import type { TtsMime, TtsFormat } from './event-schema';
 
 interface ActiveTurn {
@@ -74,11 +75,16 @@ export function interrupt(reason: string): void {
     void a.run.stop();
   }
   a.abort.abort(reason);
+  // Per design §4.6: barge-in suspends the AudioContext too. We resume on
+  // the next play() (TTS client's autoplay flow re-resumes via getAudioContext).
+  void suspendAudio();
 
   const agent = useAgentStore();
   const convo = useConversationStore();
   convo.finalizeTurn();
-  if (agent.state !== 'idle') agent.transition('idle', reason);
+  // From `error`, only clearError() is allowed by the FSM matrix.
+  if (agent.state === 'error') agent.clearError();
+  else if (agent.state !== 'idle') agent.transition('idle', reason);
 
   eventBus.emit({
     type: 'agent.interrupt',
@@ -115,7 +121,10 @@ async function runTurn(userText: string): Promise<void> {
       assistantText = await consumeChat(handle, userText, settings);
     }
   } catch (err) {
-    if (active === handle) active = null;
+    // If the user already barged in, interrupt() handled the FSM + caption
+    // teardown — don't re-emit error/aborted events from this stale turn.
+    if (active !== handle) return;
+    active = null;
     convo.finalizeTurn();
     if (abort.signal.aborted) {
       agent.transition('idle', 'chat.aborted');
@@ -126,7 +135,8 @@ async function runTurn(userText: string): Promise<void> {
   }
 
   if (!assistantText) {
-    if (active === handle) active = null;
+    if (active !== handle) return;
+    active = null;
     convo.finalizeTurn();
     agent.transition('idle', 'chat.empty');
     return;
@@ -156,6 +166,8 @@ async function runTurn(userText: string): Promise<void> {
   });
 
   await speakAndAnimate(handle, spokenText, settings);
+  // Re-arm the AudioContext for the next turn (suspended on barge-in).
+  void resumeAudio();
 
   if (active === handle) active = null;
 }
@@ -305,7 +317,6 @@ async function speakAndAnimate(
           ts: Date.now(),
           payload: {
             voice: speech.tts.voice,
-            sample_rate: 0,
             mime: mimeFor(speech.tts.format),
             format: speech.tts.format,
           },
@@ -318,6 +329,7 @@ async function speakAndAnimate(
       },
     });
   } catch (err) {
+    if (active !== handle) return;
     convo.finalizeTurn();
     agent.setError('tts.failure', err instanceof Error ? err.message : String(err));
     return;
@@ -325,6 +337,8 @@ async function speakAndAnimate(
 
   handle.tts = speak;
   const reason = await speak.done;
+  // If interrupt() ran, it already finalised conversation + state.
+  if (active !== handle) return;
   convo.finalizeTurn();
   if (reason !== 'interrupt') agent.transition('idle', `tts.${reason}`);
 }

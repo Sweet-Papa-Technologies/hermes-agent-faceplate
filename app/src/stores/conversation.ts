@@ -21,6 +21,11 @@ const MAX_HISTORY = 100;
 export const useConversationStore = defineStore('conversation', () => {
   const history = ref<Turn[]>([]);
   const currentTurn = ref<Turn | null>(null);
+  const captionsVisible = ref<boolean>(true);
+
+  function toggleCaptions(): void {
+    captionsVisible.value = !captionsVisible.value;
+  }
 
   function startTurn(role: TurnRole, id?: string): Turn {
     const turn: Turn = {
@@ -65,11 +70,13 @@ export const useConversationStore = defineStore('conversation', () => {
   return {
     history,
     currentTurn,
+    captionsVisible,
     startTurn,
     appendDelta,
     setText,
     finalizeTurn,
     clear,
+    toggleCaptions,
     captionText,
     lastAssistant,
   };

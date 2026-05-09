@@ -1,0 +1,64 @@
+# HermesAgent Faceplate speech sidecar — example config.
+# Mount this file at /etc/faceplate-sidecar/config.yaml inside the container.
+# Environment variables override the values below where applicable; see
+# faceplate_sidecar/config.py.
+
+auth:
+  # Empty token disables auth. Production deployments should set this and
+  # propagate to the Faceplate via FACEPLATE_API_KEY.
+  bearer_token: "${FACEPLATE_API_KEY}"
+  cors_origins:
+    - "http://localhost:*"
+    - "app://."
+
+asr:
+  default_model: "faster-whisper-small.en"
+  models:
+    - name: "faster-whisper-small.en"
+      backend: "faster-whisper"
+      compute_type: "int8"
+      device: "cpu"
+    # GPU-only entries (only loaded if CUDA is present at runtime).
+    - name: "faster-whisper-large-v3-turbo"
+      backend: "faster-whisper"
+      compute_type: "float16"
+      device: "cuda"
+
+tts:
+  default_model: "piper:en_US-amy-medium"
+  models:
+    - name: "piper:en_US-amy-medium"
+      backend: "piper-onnx"
+      voice_path: "/voices/en_US-amy-medium.onnx"
+    - name: "piper:en_US-libritts-r-medium"
+      backend: "piper-onnx"
+      voice_path: "/voices/en_US-libritts-r-medium.onnx"
+
+wake:
+  enabled: false
+  backend: "openwakeword"
+  models:
+    - "/wakewords/hey_hermes.onnx"
+  threshold: 0.5
+
+paraphrase_fallback:
+  enabled: true
+  backend: "litert-lm"
+  runtime:
+    binary: "/opt/litert-lm/litert_lm_main"
+    backend: "cpu" # cpu | gpu | npu — entrypoint sets per image variant
+  model:
+    huggingface_repo: "litert-community/gemma-4-E2B-it-litert-lm"
+    file: "gemma-4-E2B-it.litertlm"
+    cache_dir: "/models/litert-lm"
+  generation:
+    max_tokens: 96
+    temperature: 0.4
+    top_p: 0.95
+  api_server:
+    internal_port: 7860
+    api_key: "${LITERT_LM_INTERNAL_KEY}"
+
+healthcheck:
+  port: 8080
+  path: "/health"

@@ -78,6 +78,26 @@
       Test mode cycles every state × every viseme so you can validate a theme without running a full agent loop. It opens in a separate window so it doesn't disturb the live avatar.
     </p>
     <q-btn outline no-caps icon="science" label="Open Test Mode" @click="openTestMode" />
+
+    <template v-if="isLinux">
+      <h3>Linux</h3>
+      <q-card flat bordered class="card">
+        <q-item tag="label">
+          <q-item-section>
+            <q-item-label>Force X11 backend (Wayland sessions only)</q-item-label>
+            <q-item-label caption>
+              Re-launches Electron with <code>--ozone-platform=x11</code> so Overlay mode works through XWayland. Has no effect on macOS, Windows, or X11 sessions. Requires app restart.
+            </q-item-label>
+          </q-item-section>
+          <q-item-section side>
+            <q-toggle v-model="forceX11" />
+          </q-item-section>
+        </q-item>
+        <q-card-actions v-if="forceX11">
+          <q-btn outline no-caps icon="restart_alt" label="Relaunch now" @click="relaunch" />
+        </q-card-actions>
+      </q-card>
+    </template>
   </div>
 </template>
 
@@ -93,6 +113,7 @@ const mode = useSetting('avatar.mode');
 const aot = useSetting('avatar.always_on_top');
 const clickThrough = useSetting('avatar.click_through_default');
 const position = useSetting('avatar.position');
+const forceX11 = useSetting('linux.force_x11');
 
 const builtin = ref<{ id: string; name: string }[]>(listBuiltinThemes());
 const userThemes = ref<{ id: string; name: string; builtin: boolean }[]>([]);
@@ -127,6 +148,11 @@ const positionOptions = [
 
 const isWayland = computed(() => window.faceplate?.platform.is_wayland ?? false);
 const os = computed(() => window.faceplate?.platform.os ?? 'darwin');
+const isLinux = computed(() => os.value === 'linux');
+
+async function relaunch(): Promise<void> {
+  await window.faceplate?.platform.relaunch();
+}
 
 const recommendation = computed(() => {
   if (isWayland.value) return 'Wayland detected — Windowed mode is recommended.';

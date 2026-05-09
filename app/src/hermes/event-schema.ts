@@ -103,7 +103,12 @@ export type TtsFormat = 'mp3' | 'opus' | 'wav' | 'aac';
 
 export interface TtsAudioStart {
   voice: string;
-  sample_rate: number;
+  /**
+   * Sample rate is informational only. MSE-based playback (the v1 path)
+   * doesn't expose it on the renderer side; left optional so future
+   * non-MSE clients (mobile native, remote mirror) can populate it.
+   */
+  sample_rate?: number;
   mime: TtsMime;
   format: TtsFormat;
 }

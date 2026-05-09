@@ -24,15 +24,22 @@
       </q-list>
     </q-card>
 
-    <q-banner v-if="isMac" class="warning q-my-md" dense>
+    <q-banner v-if="isMac && accessibility === false" class="warning q-my-md" dense>
       <template #avatar><q-icon name="security" color="warning" /></template>
-      macOS hotkeys require Accessibility permission. If a press doesn't reach the Faceplate, open System Settings → Privacy & Security → Accessibility and add HermesAgent Faceplate.
+      macOS Accessibility permission is not granted — global hotkeys won't reach the Faceplate. Open System Settings → Privacy &amp; Security → Accessibility, add HermesAgent Faceplate, then re-check.
+      <template #action>
+        <q-btn flat dense no-caps label="Re-check" @click="checkAccessibility" />
+      </template>
+    </q-banner>
+    <q-banner v-else-if="isMac && accessibility === true" class="ok q-my-md" dense>
+      <template #avatar><q-icon name="check_circle" color="positive" /></template>
+      Accessibility granted — hotkeys are live.
     </q-banner>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import { useSetting } from '../../composables/use-setting';
 import HotkeyRecorder from './HotkeyRecorder.vue';
@@ -65,6 +72,17 @@ const rows = computed<Row[]>(() => [
 ]);
 
 const isMac = computed(() => window.faceplate?.platform.os === 'darwin');
+const accessibility = ref<boolean | null>(null);
+
+async function checkAccessibility(): Promise<void> {
+  if (!isMac.value) {
+    accessibility.value = true;
+    return;
+  }
+  accessibility.value = await window.faceplate?.platform.accessibilityTrusted() ?? null;
+}
+
+onMounted(() => void checkAccessibility());
 </script>
 
 <style scoped>
@@ -72,5 +90,6 @@ h2 { font-size: 22px; margin: 0 0 8px; }
 .muted { color: #666; margin-bottom: 16px; }
 .card { margin-bottom: 16px; border-radius: 10px; }
 .warning { background: rgba(245, 158, 11, 0.12); border-radius: 8px; }
+.ok { background: rgba(34, 197, 94, 0.12); border-radius: 8px; }
 code { background: rgba(0,0,0,0.05); padding: 1px 4px; border-radius: 3px; font: 12px/1 'JetBrains Mono', ui-monospace, monospace; }
 </style>

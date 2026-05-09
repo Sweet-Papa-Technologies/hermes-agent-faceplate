@@ -77,7 +77,8 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
   opts.onAnalyser?.(analyser);
 
   const ms = new MediaSource();
-  audio.src = URL.createObjectURL(ms);
+  const objectUrl = URL.createObjectURL(ms);
+  audio.src = objectUrl;
 
   const internalAbort = new AbortController();
   const signal: AbortSignal = opts.signal
@@ -101,6 +102,22 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
     try {
       sourceNode.disconnect();
       analyser.disconnect();
+    } catch {
+      /* noop */
+    }
+    // Release the MSE blob URL + drop the audio element's reference so the
+    // MediaElementAudioSourceNode↔HTMLMediaElement binding is torn down.
+    // Without this, Chrome accumulates one MES node per turn until throwing
+    // `InvalidStateError: HTMLMediaElement already connected to a different
+    // MediaElementSourceNode`.
+    try {
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      /* noop */
+    }
+    try {
+      audio.removeAttribute('src');
+      audio.load();
     } catch {
       /* noop */
     }
@@ -183,6 +200,39 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
 
     sb.addEventListener('updateend', pump);
 
+    function awaitUpdateEnd(): Promise<void> {
+      if (!sb.updating) return Promise.resolve();
+      return new Promise((res) => {
+        sb.addEventListener('updateend', () => res(), { once: true });
+      });
+    }
+
+    async function flushAndClose(): Promise<void> {
+      // Detach the permanent pump listener so it doesn't race with our
+      // sequential drain (which calls appendBuffer directly and then awaits
+      // updateend before the next chunk).
+      sb.removeEventListener('updateend', pump);
+      while (queue.length > 0) {
+        await awaitUpdateEnd();
+        const next = queue.shift();
+        if (!next) break;
+        try {
+          const copy = new Uint8Array(next.byteLength);
+          copy.set(next);
+          sb.appendBuffer(copy);
+        } catch (err) {
+          console.error('[tts] drain append failed:', err);
+          break;
+        }
+      }
+      await awaitUpdateEnd();
+      try {
+        if (ms.readyState === 'open') ms.endOfStream();
+      } catch {
+        /* noop */
+      }
+    }
+
     while (true) {
       if (signal.aborted) {
         try {
@@ -190,8 +240,11 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
         } catch {
           /* noop */
         }
+        // Use the no-arg form on a deliberate abort. Passing 'decode' fires
+        // an `error` event on the <audio> element which races with our own
+        // interrupt finish() and produces noisy stack traces.
         try {
-          if (ms.readyState === 'open') ms.endOfStream('decode');
+          if (ms.readyState === 'open') ms.endOfStream();
         } catch {
           /* noop */
         }
@@ -199,20 +252,7 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
       }
       const { done: streamDone, value } = await reader.read();
       if (streamDone) {
-        // Drain remainder, then close.
-        const drainAndClose = () => {
-          if (queue.length > 0 || sb.updating) {
-            sb.addEventListener('updateend', drainAndClose, { once: true });
-            pump();
-            return;
-          }
-          try {
-            if (ms.readyState === 'open') ms.endOfStream();
-          } catch {
-            /* noop */
-          }
-        };
-        drainAndClose();
+        await flushAndClose();
         return;
       }
       if (value) {

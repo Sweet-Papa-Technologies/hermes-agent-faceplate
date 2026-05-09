@@ -75,11 +75,11 @@
       <q-item-section>
         <q-item-label>Install shell-hook bridge</q-item-label>
         <q-item-label caption>
-          Writes one line into <code>~/.hermes/config.yaml</code> so Telegram, cron, and other turns are voiced too. Implementation lands in Phase 6.
+          Writes <code>hermes-faceplate-hook.sh</code> into <code>~/.hermes/hooks/</code> and adds a <code>hooks:</code> block to <code>~/.hermes/config.yaml</code>, so Telegram, cron, and other channels are voiced too. Observe-only — no rewrite.
         </q-item-label>
       </q-item-section>
       <q-item-section side>
-        <q-toggle v-model="installShellHook" disable />
+        <q-toggle :model-value="installShellHook" :loading="hookBusy" @update:model-value="onHookToggle" />
       </q-item-section>
     </q-item>
   </div>
@@ -87,10 +87,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useQuasar } from 'quasar';
 
 import { useSetting } from '../../composables/use-setting';
 import { useDiscoveryStore } from '../../stores/discovery';
 import TestConnectionButton from './TestConnectionButton.vue';
+import HookPreviewDialog from './HookPreviewDialog.vue';
+import type { HookInstallResult } from '../../../src-electron/preload-api';
 
 const baseUrl = useSetting('hermes.base_url');
 const apiKey = useSetting('hermes.api_key');
@@ -98,6 +101,8 @@ const configPath = useSetting('hermes.config_path');
 const installShellHook = useSetting('hermes.install_shell_hook');
 
 const showKey = ref(false);
+const hookBusy = ref(false);
+const $q = useQuasar();
 const discovery = useDiscoveryStore();
 const d = computed(() => discovery.discovery);
 
@@ -105,6 +110,47 @@ const apiKeyHint = computed(() => {
   if (apiKey.value) return 'Present.';
   return 'Set API_SERVER_KEY in ~/.hermes/.env, or paste here.';
 });
+
+function onHookToggle(value: boolean): void {
+  if (value) installFlow();
+  else uninstallFlow();
+}
+
+function installFlow(): void {
+  hookBusy.value = true;
+  $q.dialog({ component: HookPreviewDialog })
+    .onOk((result: HookInstallResult) => {
+      hookBusy.value = false;
+      if (result.ok) {
+        $q.notify({
+          type: 'positive',
+          message: `Bridge installed (listener on :${result.listener_port}).`,
+          timeout: 4000,
+        });
+      } else {
+        $q.notify({ type: 'negative', message: result.error ?? 'Install failed.', timeout: 6000 });
+      }
+    })
+    .onCancel(() => {
+      hookBusy.value = false;
+    });
+}
+
+async function uninstallFlow(): Promise<void> {
+  const fp = window.faceplate;
+  if (!fp) return;
+  hookBusy.value = true;
+  try {
+    const result = await fp.hermes.hookUninstall();
+    if (result.ok) {
+      $q.notify({ type: 'positive', message: 'Bridge removed.', timeout: 3000 });
+    } else {
+      $q.notify({ type: 'negative', message: result.error ?? 'Uninstall failed.', timeout: 6000 });
+    }
+  } finally {
+    hookBusy.value = false;
+  }
+}
 </script>
 
 <style scoped>

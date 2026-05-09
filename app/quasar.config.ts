@@ -197,9 +197,16 @@ export default defineConfig((ctx) => {
         mac: {
           category: 'public.app-category.productivity'
         },
-        // Sidecar compose files are bundled into resources/ at package time;
-        // populated when sidecar/ comes online (Phase 5).
-        extraResources: []
+        // Bundle the sidecar compose files (and example config) into
+        // resources/sidecar/ so the app can `docker compose up -d` without
+        // requiring the user to clone the repo.
+        extraResources: [
+          {
+            from: '../sidecar',
+            to: 'sidecar',
+            filter: ['compose.*.yml', 'config.example.yaml']
+          }
+        ]
       }
     },
 

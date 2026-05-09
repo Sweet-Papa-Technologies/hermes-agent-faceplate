@@ -14,6 +14,14 @@
       <StateRing />
       <g class="avatar-head" v-html="headSvg" />
       <VisemeMouth />
+      <!--
+        Hardcoded mic-active LED — not theme-overridable per design §12.1.
+        Visible whenever the renderer holds a live MediaStream from the mic.
+      -->
+      <g v-if="micActive" class="mic-led" aria-hidden="true">
+        <circle cx="220" cy="38" r="9" fill="#22c55e" opacity="0.92" />
+        <circle cx="220" cy="38" r="4" fill="#0c5132" />
+      </g>
     </svg>
     <div v-else class="avatar-loading">
       {{ theme.loadError ?? 'Loading avatar…' }}
@@ -28,12 +36,16 @@ import StateRing from './StateRing.vue';
 import VisemeMouth from './VisemeMouth.vue';
 import { useThemeStore } from '../stores/theme';
 import { useSettingsStore } from '../stores/settings';
+import { useAgentStore } from '../stores/agent';
 
 const theme = useThemeStore();
 const settings = useSettingsStore();
+const agent = useAgentStore();
 
 const manifest = computed(() => theme.loaded?.manifest);
 const headSvg = computed(() => theme.loaded?.svg.head ?? '');
+const micActive = computed(() => agent.micActive);
+const scale = computed(() => settings.settings.avatar.scale);
 
 const rootEl = ref<HTMLDivElement | null>(null);
 
@@ -149,6 +161,20 @@ onBeforeUnmount(() => {
   height: 100%;
   max-width: 320px;
   max-height: 320px;
+  transform: scale(v-bind(scale));
+  transform-origin: center;
+  transition: transform 200ms ease;
+}
+
+.mic-led {
+  /* Subtle breathing for the LED to make it noticeable. */
+  animation: led-pulse 1500ms ease-in-out infinite;
+  transform-origin: 220px 38px;
+}
+
+@keyframes led-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
 }
 
 .avatar-loading {

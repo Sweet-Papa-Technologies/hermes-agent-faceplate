@@ -35,6 +35,9 @@ const hermes: FaceplatePreload['hermes'] = {
   testConnection: (target: ConnectionTarget) =>
     ipcRenderer.invoke(IPC.hermes.test, target),
   paraphrase: (text: string) => ipcRenderer.invoke(IPC.hermes.paraphrase, text),
+  hookPreview: () => ipcRenderer.invoke(IPC.hermes.hookPreview),
+  hookInstall: () => ipcRenderer.invoke(IPC.hermes.hookInstall),
+  hookUninstall: () => ipcRenderer.invoke(IPC.hermes.hookUninstall),
 };
 
 const win: FaceplatePreload['window'] = {
@@ -95,6 +98,8 @@ const platform: FaceplatePreload['platform'] = {
   is_wayland:
     process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland',
   app_version: process.env.npm_package_version ?? '0.0.0',
+  accessibilityTrusted: () => ipcRenderer.invoke(IPC.platform.accessibilityTrusted),
+  relaunch: () => ipcRenderer.invoke(IPC.platform.relaunch),
 };
 
 const api: FaceplatePreload = {

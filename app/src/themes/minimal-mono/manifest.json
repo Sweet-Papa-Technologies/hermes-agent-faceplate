@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "minimal-mono",
+  "name": "Minimal Mono",
+  "author": "HermesAgent Faceplate",
+  "license": "MIT",
+  "canvas": { "width": 256, "height": 256, "bg": "transparent" },
+  "layers": {
+    "head": { "src": "head.svg" },
+    "state_ring": {
+      "src": "ring.svg",
+      "tint_per_state": {
+        "idle": "#1a1a1a",
+        "listening": "#0070f3",
+        "thinking": "#a855f7",
+        "speaking": "#16a34a",
+        "error": "#dc2626"
+      }
+    }
+  },
+  "visemes": {
+    "A": "<g id=\"viseme-A\"><ellipse cx=\"128\" cy=\"178\" rx=\"18\" ry=\"15\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"3\"/></g>",
+    "B": "<g id=\"viseme-B\"><ellipse cx=\"128\" cy=\"178\" rx=\"16\" ry=\"8\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"3\"/></g>",
+    "C": "<g id=\"viseme-C\"><circle cx=\"128\" cy=\"178\" r=\"8\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"3\"/></g>",
+    "D": "<g id=\"viseme-D\"><line x1=\"108\" y1=\"178\" x2=\"148\" y2=\"178\" stroke=\"#1a1a1a\" stroke-width=\"3\" stroke-linecap=\"round\"/></g>",
+    "E": "<g id=\"viseme-E\"><line x1=\"114\" y1=\"178\" x2=\"142\" y2=\"178\" stroke=\"#1a1a1a\" stroke-width=\"3\" stroke-linecap=\"round\"/></g>",
+    "F": "<g id=\"viseme-F\"><path d=\"M112,178 Q128,172 144,178\" stroke=\"#1a1a1a\" stroke-width=\"3\" stroke-linecap=\"round\" fill=\"none\"/></g>",
+    "X": "<g id=\"viseme-X\"><line x1=\"118\" y1=\"178\" x2=\"138\" y2=\"178\" stroke=\"#1a1a1a\" stroke-width=\"2\" stroke-linecap=\"round\"/></g>"
+  },
+  "captions": {
+    "font_family": "ui-monospace, JetBrains Mono, monospace",
+    "font_size_px": 14,
+    "color": "#1a1a1a",
+    "background": "rgba(255,255,255,0.92)",
+    "align": "center",
+    "bottom_offset_px": 28
+  }
+}

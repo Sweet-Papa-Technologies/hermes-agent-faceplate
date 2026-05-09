@@ -13,8 +13,10 @@ import { startAsrSession, type AsrSession, type AsrEndpoint } from './asr-client
 import { useAgentStore } from '../stores/agent';
 import { useSettingsStore } from '../stores/settings';
 import { eventBus } from '../boot/event-bus';
+import { interrupt as interruptTurn } from '../hermes/turn-handler';
 
 let session: AsrSession | null = null;
+let starting = false;
 let attached = false;
 let detach: (() => void) | null = null;
 
@@ -44,21 +46,36 @@ export async function toggle(): Promise<void> {
 }
 
 async function start(): Promise<void> {
+  if (starting || session) return;
+  starting = true;
   const settings = useSettingsStore();
   const agent = useAgentStore();
   const endpoint = asrEndpointFromSettings(settings);
-  if (!endpoint) return;
+  if (!endpoint) {
+    starting = false;
+    return;
+  }
+
+  // If the agent is mid-turn (thinking or speaking), barge-in first so the
+  // FSM matrix allows the listening transition.
+  if (agent.state === 'thinking' || agent.state === 'speaking') {
+    interruptTurn('user.ptt');
+  }
 
   try {
-    session = await startAsrSession({ endpoint });
+    const next = await startAsrSession({ endpoint });
+    session = next;
     agent.transition('listening', 'ptt');
-    session.done.catch((err) => {
+    next.done.catch((err) => {
+      if (session === next) session = null;
       console.error('[ptt] session failed:', err);
       agent.setError('asr.failure', err instanceof Error ? err.message : String(err));
     });
   } catch (err) {
     console.error('[ptt] failed to open mic:', err);
     agent.setError('mic.permission', err instanceof Error ? err.message : String(err));
+  } finally {
+    starting = false;
   }
 }
 
@@ -70,7 +87,9 @@ async function stopAndSend(): Promise<void> {
   try {
     const result = await s.stop();
     if (!result.text) {
-      agent.transition('idle', 'asr.empty');
+      // listening → idle is legal; if we somehow drifted into error, clear it.
+      if (agent.state === 'error') agent.clearError();
+      else agent.transition('idle', 'asr.empty');
       return;
     }
     eventBus.emit({
@@ -93,7 +112,7 @@ function cancel(): void {
   const agent = useAgentStore();
   session.cancel();
   session = null;
-  agent.transition('idle', 'ptt.cancel');
+  if (agent.state === 'listening') agent.transition('idle', 'ptt.cancel');
 }
 
 function asrEndpointFromSettings(settings: ReturnType<typeof useSettingsStore>): AsrEndpoint | null {

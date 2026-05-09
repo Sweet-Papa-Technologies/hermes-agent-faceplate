@@ -20,6 +20,16 @@ export const useAgentStore = defineStore('agent', () => {
   const state = ref<AgentState>('idle');
   const lastError = ref<{ code: string; message: string } | null>(null);
   const currentTurnId = ref<string | null>(null);
+  /**
+   * True whenever the renderer holds a live MediaStream from the mic. Drives
+   * the hardcoded green-LED indicator on the avatar halo per design §12.1
+   * (theme-immutable on purpose).
+   */
+  const micActive = ref<boolean>(false);
+
+  function setMicActive(active: boolean): void {
+    micActive.value = active;
+  }
 
   function transition(to: AgentState, reason?: string): boolean {
     const from = state.value;
@@ -54,10 +64,12 @@ export const useAgentStore = defineStore('agent', () => {
     state,
     lastError,
     currentTurnId,
+    micActive,
     transition,
     setError,
     clearError,
     setTurn,
+    setMicActive,
     isIdle,
     isSpeaking,
     isListening,

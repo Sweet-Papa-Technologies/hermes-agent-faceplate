@@ -9,6 +9,7 @@ import { eventBus } from '../boot/event-bus';
 import { useAgentStore } from '../stores/agent';
 import { useSettingsStore } from '../stores/settings';
 import { startAsrSession, type AsrEndpoint, type AsrSession } from './asr-client';
+import { interrupt as interruptTurn } from '../hermes/turn-handler';
 
 const TARGET_SR = 16_000;
 const FRAME_MS = 40; // 640 samples per frame at 16 kHz
@@ -38,8 +39,12 @@ export async function startWakeClient(): Promise<void> {
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, channelCount: 1 },
+      // AEC + NS on so the wake model doesn't self-trigger on its own TTS
+      // playback. The detector still gets clean speech because Chromium's
+      // AEC is downstream-aware.
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
     });
+    useAgentStore().setMicActive(true);
   } catch (err) {
     console.error('[wake] mic open failed:', err);
     return;
@@ -90,6 +95,7 @@ export function stopWakeClient(): void {
   if (stream) {
     for (const t of stream.getTracks()) t.stop();
     stream = null;
+    useAgentStore().setMicActive(false);
   }
   if (socket) {
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
@@ -108,6 +114,12 @@ function onMessage(ev: MessageEvent<string | ArrayBuffer>): void {
     return;
   }
   if (msg.type !== 'wake') return;
+
+  // Suppress detections that happen while the avatar is speaking — even
+  // with AEC the detector can still self-trigger on its own TTS output.
+  const agent = useAgentStore();
+  if (agent.state === 'speaking') return;
+
   const now = Date.now();
   if (now < cooldownUntil) return;
   cooldownUntil = now + POST_WAKE_COOLDOWN_MS;
@@ -126,13 +138,17 @@ async function openCaptureWindow(): Promise<void> {
   const agent = useAgentStore();
   const endpoint = asrEndpointFromSettings(settings);
   if (!endpoint) return;
+  // Barge-in if anything's already in flight so the FSM allows listening.
+  if (agent.state === 'thinking' || agent.state === 'speaking') {
+    interruptTurn('user.wake');
+  }
   try {
     asrSession = await startAsrSession({ endpoint, maxDurationMs: 8_000 });
     agent.transition('listening', 'wake');
     const result = await asrSession.stop();
     asrSession = null;
     if (!result.text) {
-      agent.transition('idle', 'wake.silent');
+      if (agent.state === 'listening') agent.transition('idle', 'wake.silent');
       return;
     }
     eventBus.emit({

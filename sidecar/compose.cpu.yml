@@ -1,0 +1,38 @@
+# Default — `docker compose -f sidecar/compose.cpu.yml up`.
+# The Faceplate setup wizard runs this on first launch when sidecar mode is
+# "bundled" (the default).
+
+name: faceplate-sidecar
+
+services:
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: ghcr.io/nousresearch/hermes-faceplate-sidecar:cpu
+    container_name: faceplate-sidecar
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      FACEPLATE_API_KEY: "${FACEPLATE_API_KEY:-}"
+      FACEPLATE_BUILD: "cpu"
+    volumes:
+      - faceplate-models:/models
+      - faceplate-voices:/voices
+      - faceplate-wakewords:/wakewords
+      # Mount your own config.yaml here (copy from config.example.yaml).
+      # If config.yaml does not exist on the host, docker creates an empty
+      # FILE — delete it and re-run, or change to a different path.
+      - ./config.yaml:/etc/faceplate-sidecar/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  faceplate-models:
+  faceplate-voices:
+  faceplate-wakewords:

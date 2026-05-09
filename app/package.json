@@ -13,6 +13,7 @@
     "build": "quasar build -m electron",
     "build:web": "quasar build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "notices": "node scripts/generate-notices.mjs",
     "postinstall": "quasar prepare"
   },
   "dependencies": {

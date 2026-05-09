@@ -7,6 +7,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
 import type { HermesDiscovery } from '../../src-electron/preload-api';
+import { useSettingsStore } from './settings';
 
 export const useDiscoveryStore = defineStore('discovery', () => {
   const discovery = ref<HermesDiscovery | null>(null);
@@ -29,12 +30,18 @@ export const useDiscoveryStore = defineStore('discovery', () => {
 
   /**
    * True when the local hermes-agent gateway is reachable via the runs API:
-   * config exists, API server enabled, and a key is present.
+   * config exists, API server enabled, and a key is available either from
+   * the discovered .env or from the user's settings (typed into the
+   * Connection tab).
    */
   const useRuns = computed(() => {
     const d = discovery.value;
     if (!d) return false;
-    return d.found && d.api_server_enabled && d.api_key_present;
+    if (!d.found || !d.api_server_enabled) return false;
+    if (d.api_key_present) return true;
+    // Fallback: user pasted a key in Settings without writing it to .env.
+    const settings = useSettingsStore();
+    return Boolean(settings.settings.hermes.api_key);
   });
 
   return { discovery, loading, error, refresh, useRuns };

@@ -13,8 +13,11 @@ import Avatar from '../components/Avatar.vue';
 import Captions from '../components/Captions.vue';
 import TypingBar from '../components/TypingBar.vue';
 import { useSettingsStore } from '../stores/settings';
+import { useConversationStore } from '../stores/conversation';
+import { replayLastAssistant } from '../hermes/replay';
 
 const settings = useSettingsStore();
+const convo = useConversationStore();
 
 interface TypingBarHandle {
   toggle(): void;
@@ -34,16 +37,17 @@ onMounted(() => {
         typingBarRef.value?.toggle();
         return;
       case 'replay':
-        // Real impl in Phase 2 once TTS is wired; here we just light up the
-        // state ring so the loop is visible.
+        void replayLastAssistant();
+        return;
+      case 'captions':
+        convo.toggleCaptions();
         return;
       case 'interrupt':
         typingBarRef.value?.close();
         return;
       default:
-        // Other hotkeys are owned by main (show/hide, cycle_monitor) or by
-        // the audio pipeline (push_to_talk, captions) and arrive in later
-        // phases.
+        // show_hide / cycle_monitor are owned by main; push_to_talk lives
+        // in the audio pipeline.
         return;
     }
   });

@@ -30,6 +30,32 @@ export function isWayland(): boolean {
   return process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland';
 }
 
+function computeOverlayBounds(
+  workArea: { x: number; y: number; width: number; height: number },
+  w: number,
+  h: number,
+): { x: number; y: number; width: number; height: number } {
+  const margin = 24;
+  const pos = getSettings().avatar.position;
+  switch (pos) {
+    case 'top_left':
+      return { x: workArea.x + margin, y: workArea.y + margin, width: w, height: h };
+    case 'top_right':
+      return { x: workArea.x + workArea.width - w - margin, y: workArea.y + margin, width: w, height: h };
+    case 'bottom_left':
+      return { x: workArea.x + margin, y: workArea.y + workArea.height - h - margin, width: w, height: h };
+    case 'bottom_right':
+    case 'last_known': // last_known is honored elsewhere; default safely
+    default:
+      return {
+        x: workArea.x + workArea.width - w - margin,
+        y: workArea.y + workArea.height - h - margin,
+        width: w,
+        height: h,
+      };
+  }
+}
+
 function preloadPath(): string {
   return path.resolve(
     currentDir,
@@ -73,15 +99,10 @@ function createOverlayWindow(): BrowserWindow {
     win.setWindowButtonVisibility(false);
   }
 
-  // Position bottom-right of the primary display by default.
+  // Position per `avatar.position` setting, defaulting bottom-right.
   const primary = screen.getPrimaryDisplay();
-  const { workArea } = primary;
-  win.setBounds({
-    x: workArea.x + workArea.width - OVERLAY_W - 24,
-    y: workArea.y + workArea.height - OVERLAY_H - 24,
-    width: OVERLAY_W,
-    height: OVERLAY_H,
-  });
+  const bounds = computeOverlayBounds(primary.workArea, OVERLAY_W, OVERLAY_H);
+  win.setBounds(bounds);
 
   // Click-through is initially OFF; renderer turns it on once mounted and
   // reports per-pixel hit regions on mousemove (forward:true).
@@ -209,6 +230,39 @@ export function createSettingsWindow(): BrowserWindow {
     settingsWindow = null;
   });
   return settingsWindow;
+}
+
+let wizardWindow: BrowserWindow | null = null;
+
+export function createWizardWindow(): BrowserWindow {
+  if (wizardWindow && !wizardWindow.isDestroyed()) {
+    wizardWindow.focus();
+    return wizardWindow;
+  }
+  wizardWindow = new BrowserWindow({
+    width: 720,
+    height: 600,
+    title: 'HermesAgent Faceplate — Setup',
+    frame: true,
+    resizable: false,
+    backgroundColor: '#0e0e10',
+    icon: path.resolve(currentDir, 'icons/icon.png'),
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      preload: preloadPath(),
+    },
+  });
+  void loadRoute(wizardWindow, '/wizard');
+  wizardWindow.on('closed', () => {
+    wizardWindow = null;
+  });
+  return wizardWindow;
+}
+
+export function closeWizardWindow(): void {
+  if (wizardWindow && !wizardWindow.isDestroyed()) wizardWindow.close();
+  wizardWindow = null;
 }
 
 export function registerWindowIpc(): void {

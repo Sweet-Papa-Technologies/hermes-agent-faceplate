@@ -65,9 +65,11 @@ export function wirePreloadBridge(bus: EventBus): void {
   // listener below doesn't echo it back.
   fp.events.subscribe((event) => bus.emitFromRemote(event));
   // Outbound: local emissions get published to main; tagged remote events
-  // skip the round-trip.
+  // skip the round-trip. Lip-sync envelopes fire ~30 Hz and are useless
+  // outside the avatar window — drop them before crossing IPC.
   bus.onAny((event) => {
     if ((event as FaceplateEvent & RemoteFlagged)[REMOTE_FLAG]) return;
+    if (event.type === 'tts.audio.envelope') return;
     fp.events.publish(event);
   });
 }

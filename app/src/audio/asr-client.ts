@@ -37,11 +37,14 @@ export interface AsrSession {
 const DEFAULT_MAX_MS = 30_000;
 
 export async function startAsrSession(opts: AsrSessionOptions): Promise<AsrSession> {
+  const { useAgentStore } = await import('../stores/agent');
+  const agent = useAgentStore();
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: opts.deviceId
       ? { deviceId: { exact: opts.deviceId }, echoCancellation: true, noiseSuppression: true }
       : { echoCancellation: true, noiseSuppression: true },
   });
+  agent.setMicActive(true);
 
   const mimeType = pickRecorderMime();
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -54,6 +57,12 @@ export async function startAsrSession(opts: AsrSessionOptions): Promise<AsrSessi
     if (e.data.size > 0) chunks.push(e.data);
   });
 
+  recorder.addEventListener('error', (e) => {
+    cancelled = true;
+    teardownStream();
+    rejectDone(e instanceof ErrorEvent ? e.error : new Error('recorder error'));
+  });
+
   let resolveDone: (r: AsrResult) => void = () => {};
   let rejectDone: (e: unknown) => void = () => {};
   const done = new Promise<AsrResult>((res, rej) => {
@@ -63,6 +72,7 @@ export async function startAsrSession(opts: AsrSessionOptions): Promise<AsrSessi
 
   function teardownStream(): void {
     for (const t of stream.getTracks()) t.stop();
+    agent.setMicActive(false);
   }
 
   recorder.addEventListener('stop', () => {

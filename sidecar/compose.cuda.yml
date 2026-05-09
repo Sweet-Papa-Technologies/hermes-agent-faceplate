@@ -1,0 +1,41 @@
+name: faceplate-sidecar-cuda
+
+services:
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: ghcr.io/nousresearch/hermes-faceplate-sidecar:cuda
+    container_name: faceplate-sidecar
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      FACEPLATE_API_KEY: "${FACEPLATE_API_KEY:-}"
+      FACEPLATE_BUILD: "cuda"
+      LITERT_LM_BACKEND: "gpu"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - faceplate-models:/models
+      - faceplate-voices:/voices
+      - faceplate-wakewords:/wakewords
+      - ./config.yaml:/etc/faceplate-sidecar/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  faceplate-models:
+  faceplate-voices:
+  faceplate-wakewords:

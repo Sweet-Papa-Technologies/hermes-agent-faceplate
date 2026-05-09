@@ -107,6 +107,13 @@ export const LinuxSettings = z.object({
   force_x11: z.boolean().default(false),
 });
 
+export const WizardState = z.object({
+  completed: z.boolean().default(false),
+  /** Last step index the user reached, in case we want to resume mid-wizard. */
+  last_step: z.number().int().nonnegative().default(0),
+});
+export type WizardState = z.infer<typeof WizardState>;
+
 export const FaceplateSettings = z.object({
   schema_version: z.literal(1).default(1),
   hermes: HermesSettings.default({}),
@@ -117,6 +124,7 @@ export const FaceplateSettings = z.object({
   avatar: AvatarSettings.default({}),
   privacy: PrivacySettings.default({}),
   linux: LinuxSettings.default({}),
+  wizard: WizardState.default({}),
 });
 
 export type FaceplateSettings = z.infer<typeof FaceplateSettings>;

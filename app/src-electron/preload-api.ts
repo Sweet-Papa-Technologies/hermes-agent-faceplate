@@ -38,6 +38,31 @@ export interface ParaphraseResult {
   latency_ms: number;
 }
 
+export interface HookPreview {
+  /** Absolute path on disk where the hook script will be written. */
+  script_path: string;
+  /** Bash script content the user is about to write. */
+  script: string;
+  /** Path to ~/.hermes/config.yaml that will be edited. */
+  config_path: string;
+  /** YAML before our edit (empty string if file does not exist). */
+  current_yaml: string;
+  /** YAML after our edit. */
+  merged_yaml: string;
+  /** Unified-diff-style summary, additions only. */
+  diff_summary: string;
+  /** True if our hook keys are already present (toggle is a no-op). */
+  already_installed: boolean;
+}
+
+export interface HookInstallResult {
+  ok: boolean;
+  config_path: string;
+  script_path: string;
+  listener_port: number;
+  error?: string;
+}
+
 export interface TestResult {
   ok: boolean;
   latency_ms: number;
@@ -82,6 +107,9 @@ export interface FaceplatePreload {
     discoverConfig(): Promise<HermesDiscovery>;
     testConnection(target: ConnectionTarget): Promise<TestResult>;
     paraphrase(text: string): Promise<ParaphraseResult>;
+    hookPreview(): Promise<HookPreview>;
+    hookInstall(): Promise<HookInstallResult>;
+    hookUninstall(): Promise<HookInstallResult>;
   };
   window: {
     setClickThrough(enabled: boolean): Promise<void>;
@@ -96,6 +124,11 @@ export interface FaceplatePreload {
     unregister(name: HotkeyName): Promise<void>;
     onPress(cb: (name: HotkeyName) => void): () => void;
   };
+  /**
+   * Audio device enumeration is done in the renderer via
+   * navigator.mediaDevices.enumerateDevices(). Kept on the contract so a
+   * future native shim (Capacitor) can satisfy the same surface.
+   */
   audio: {
     listInputDevices(): Promise<MediaDeviceLite[]>;
     listOutputDevices(): Promise<MediaDeviceLite[]>;
@@ -117,6 +150,9 @@ export interface FaceplatePreload {
     os: 'darwin' | 'win32' | 'linux';
     is_wayland: boolean;
     app_version: string;
+    /** macOS only: returns trusted state for Accessibility (globalShortcut). */
+    accessibilityTrusted(): Promise<boolean>;
+    relaunch(): Promise<void>;
   };
 }
 
@@ -136,6 +172,9 @@ export const IPC = {
     discover: 'faceplate:hermes:discover',
     test: 'faceplate:hermes:test',
     paraphrase: 'faceplate:hermes:paraphrase',
+    hookPreview: 'faceplate:hermes:hook-preview',
+    hookInstall: 'faceplate:hermes:hook-install',
+    hookUninstall: 'faceplate:hermes:hook-uninstall',
   },
   window: {
     setClickThrough: 'faceplate:window:set-click-through',
@@ -150,10 +189,9 @@ export const IPC = {
     unregister: 'faceplate:hotkeys:unregister',
     pressed: 'faceplate:hotkeys:pressed',
   },
-  audio: {
-    listInputs: 'faceplate:audio:list-inputs',
-    listOutputs: 'faceplate:audio:list-outputs',
-  },
+  // audio.listInputs/listOutputs intentionally omitted — renderer uses the
+  // browser's enumerateDevices() instead. The preload still exposes stub
+  // methods for the v2 Capacitor port.
   sidecar: {
     status: 'faceplate:sidecar:status',
     start: 'faceplate:sidecar:start',
@@ -166,5 +204,9 @@ export const IPC = {
   events: {
     publish: 'faceplate:events:publish',
     broadcast: 'faceplate:events:broadcast',
+  },
+  platform: {
+    accessibilityTrusted: 'faceplate:platform:accessibility-trusted',
+    relaunch: 'faceplate:platform:relaunch',
   },
 } as const;
