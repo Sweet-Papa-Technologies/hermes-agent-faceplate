@@ -1,5 +1,9 @@
 # Faceplate sidecar — :cpu build (default).
-# Bundles Piper + faster-whisper int8 + openWakeWord + LiteRT-LM.
+# Bundles Piper + faster-whisper int8 + openWakeWord. The LLM (paraphrase
+# fallback) lives OUTSIDE the container as a host-native `litert-lm serve`
+# process — see scripts/start-litert.sh and Makefile target `litert-up`.
+# The Faceplate paraphrase pass talks directly to the host LiteRT-LM URL,
+# bypassing the sidecar entirely.
 
 FROM python:3.12-slim AS base
 
@@ -11,16 +15,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # System deps:
 #   ffmpeg     — TTS PCM → MP3 / Opus muxing
-#   curl       — healthcheck + bootstrap downloads
-#   nodejs     — required to run the litert-lm-api-server wrapper
+#   curl       — healthcheck + bootstrap voice download
 #   git        — pip install of HF deps that need git
 #   openssl    — entrypoint random token
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
         ca-certificates \
-        nodejs \
-        npm \
         git \
         openssl \
         libxml2 \
@@ -30,29 +31,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY pyproject.toml ./
 RUN pip install --upgrade pip && pip install .
+
+# openwakeword installed with --no-deps to skip the bogus tflite-runtime
+# requirement from its setup.py. tflite-runtime has no Python ≥3.11 wheels
+# and no arm64 Linux wheels; openwakeword 0.6+ defers the import to the
+# Model constructor and only loads tflite/onnx based on the
+# `inference_framework` parameter — we use ONNX (see backends/openwakeword_be.py).
+# All real openwakeword runtime deps (scipy, sklearn, requests, mutagen, +
+# onnxruntime via faster-whisper) are already satisfied by the previous step.
+RUN pip install --no-deps "openwakeword>=0.6"
+
 COPY faceplate_sidecar/ /app/faceplate_sidecar/
 # Re-install in editable mode so subsequent code edits take effect on a
 # `docker compose restart`. --no-deps keeps the layer thin (deps are pinned
 # by the previous step).
 RUN pip install --no-deps -e .
-
-# ----------------------------------------------------------------- LiteRT-LM
-# Pulled at image build time. The actual model weights are downloaded on
-# first run (cached in /models/litert-lm via volume mount).
-ARG LITERT_LM_API_SERVER_REF=v0.3.0
-RUN git clone --depth 1 --branch "${LITERT_LM_API_SERVER_REF}" \
-      https://github.com/imertz/litert-lm-api-server.git \
-      /opt/litert-lm-api-server \
-    && cd /opt/litert-lm-api-server \
-    && npm install --omit=dev
-
-# litert_lm_main binary — downloaded as a release artifact from the official
-# litert-lm GitHub releases. Version pinned for reproducibility.
-ARG LITERT_LM_BINARY_VERSION=0.7.3
-RUN mkdir -p /opt/litert-lm \
-    && curl -fsSL "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v${LITERT_LM_BINARY_VERSION}/litert_lm_main_linux_x86_64" \
-       -o /opt/litert-lm/litert_lm_main \
-    && chmod +x /opt/litert-lm/litert_lm_main
 
 # ----------------------------------------------------------------- Defaults
 COPY config.example.yaml /etc/faceplate-sidecar/config.yaml

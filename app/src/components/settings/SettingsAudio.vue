@@ -86,11 +86,21 @@ const outputDevices = ref<MediaDeviceInfo[]>([]);
 const micPermission = ref<PermissionState | null>(null);
 const isMacOs = computed(() => window.faceplate?.platform.os === 'darwin');
 
+function labelFor(d: MediaDeviceInfo, kindFallback: string): string {
+  // Chromium fills `label` only after mic permission is granted; before that
+  // we get empty strings. The "default" entry's label, when present, has the
+  // shape "Default - <real device name>" — surface that as just "Default …".
+  if (d.deviceId === 'default') return d.label ? d.label : `Default ${kindFallback}`;
+  if (d.label) return d.label;
+  if (d.deviceId === '') return `${kindFallback} (no label — grant mic permission)`;
+  return `${kindFallback} ${d.deviceId.slice(0, 6)}`;
+}
+
 const inputOptions = computed<DeviceOption[]>(() =>
-  inputDevices.value.map((d) => ({ deviceId: d.deviceId, label: d.label || `Mic ${d.deviceId.slice(0, 6)}` })),
+  inputDevices.value.map((d) => ({ deviceId: d.deviceId, label: labelFor(d, 'microphone') })),
 );
 const outputOptions = computed<DeviceOption[]>(() =>
-  outputDevices.value.map((d) => ({ deviceId: d.deviceId, label: d.label || `Output ${d.deviceId.slice(0, 6)}` })),
+  outputDevices.value.map((d) => ({ deviceId: d.deviceId, label: labelFor(d, 'output') })),
 );
 
 const outputHint = computed(() =>
@@ -99,11 +109,30 @@ const outputHint = computed(() =>
     : 'Used for TTS playback.',
 );
 
+function pickDefault(devices: MediaDeviceInfo[]): string {
+  // Chromium exposes a synthetic entry with deviceId="default" pointing at
+  // whatever the OS currently considers the default. If that's missing
+  // (Firefox, some ALSA setups) fall back to the first real device.
+  const def = devices.find((d) => d.deviceId === 'default');
+  if (def) return def.deviceId;
+  const real = devices.find((d) => d.deviceId && d.deviceId !== '');
+  return real?.deviceId ?? '';
+}
+
 async function refreshDevices(): Promise<void> {
   try {
     const all = await navigator.mediaDevices.enumerateDevices();
     inputDevices.value = all.filter((d) => d.kind === 'audioinput');
     outputDevices.value = all.filter((d) => d.kind === 'audiooutput');
+    // Auto-select whatever the OS reports as default, but only if the user
+    // hasn't explicitly chosen something — preserves manual overrides
+    // across re-enumerations (e.g., when a USB headset is plugged in).
+    if (!inputDeviceId.value || !inputDevices.value.some((d) => d.deviceId === inputDeviceId.value)) {
+      inputDeviceId.value = pickDefault(inputDevices.value);
+    }
+    if (!outputDeviceId.value || !outputDevices.value.some((d) => d.deviceId === outputDeviceId.value)) {
+      outputDeviceId.value = pickDefault(outputDevices.value);
+    }
   } catch (err) {
     console.error('[settings.audio] enumerateDevices failed:', err);
   }

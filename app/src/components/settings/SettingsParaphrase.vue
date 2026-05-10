@@ -29,6 +29,20 @@
       <q-separator />
       <q-card-section>
         <q-option-group v-model="model" :options="modelOptions" type="radio" />
+        <q-banner v-if="!canBypass && model === 'reuse_hermes_llm'" class="warning q-mt-sm" dense>
+          <template #avatar><q-icon name="warning" color="warning" /></template>
+          Local <code>~/.hermes/</code> isn't readable on this machine, so we can't reach your underlying LLM directly. Paraphrase will fall back to local litert-lm until you run hermes-agent locally or switch to "Local litert-lm".
+        </q-banner>
+      </q-card-section>
+      <q-separator v-if="model === 'local_litert'" />
+      <q-card-section v-if="model === 'local_litert'">
+        <q-input
+          v-model="litertUrl"
+          label="litert-lm endpoint URL"
+          filled
+          stack-label
+          hint="Default: http://127.0.0.1:7860/v1 — started on the host by `make litert-up`."
+        />
       </q-card-section>
       <q-separator />
       <q-card-section>
@@ -65,6 +79,7 @@
 import { ref, computed } from 'vue';
 
 import { useSetting } from '../../composables/use-setting';
+import { useDiscoveryStore } from '../../stores/discovery';
 import { paraphrase, type ParaphraseOutcome } from '../../hermes/paraphrase';
 
 const enabled = useSetting('paraphrase.enabled');
@@ -72,6 +87,10 @@ const trigger = useSetting('paraphrase.trigger_chars');
 const target = useSetting('paraphrase.target_words');
 const model = useSetting('paraphrase.model');
 const prompt = useSetting('paraphrase.system_prompt');
+const litertUrl = useSetting('paraphrase.litert_lm_url');
+
+const discovery = useDiscoveryStore();
+const canBypass = computed(() => discovery.canBypassParaphrase);
 
 const sample = ref(
   'I dug into the logs and found that the failing requests all share a common upstream — the auth service was rejecting tokens issued before the rotation at 14:02 UTC. Restarting the dependent services and forcing a token refresh restored normal traffic; I have a backfill running for the queued jobs and will keep an eye on the dashboards for the next hour.',
@@ -80,9 +99,9 @@ const result = ref<ParaphraseOutcome | null>(null);
 const loading = ref(false);
 
 const modelOptions = [
-  { label: 'Reuse hermes-agent\'s LLM (recommended)', value: 'reuse_hermes_llm' },
-  { label: 'Sidecar fallback (Gemma 4 E2B via LiteRT-LM)', value: 'sidecar_fallback' },
-  { label: 'Disabled (always speak the full text)', value: 'disabled' },
+  { label: 'Local litert-lm — host-native Google AI Edge LiteRT-LM serve (default)', value: 'local_litert' },
+  { label: 'Reuse hermes-agent\'s configured LLM (requires local ~/.hermes/ access)', value: 'reuse_hermes_llm' },
+  { label: 'Disabled — always speak the full text', value: 'disabled' },
 ];
 
 const resultBanner = computed(() => {
@@ -90,13 +109,21 @@ const resultBanner = computed(() => {
   if (result.value.used === 'skipped') return 'Below trigger threshold — original returned unchanged.';
   if (result.value.used === 'disabled') return 'Paraphrase is disabled.';
   if (result.value.used === 'reuse_hermes_llm') return `hermes LLM (${result.value.latency_ms} ms)`;
-  if (result.value.used === 'sidecar_fallback') return `sidecar fallback (${result.value.latency_ms} ms)`;
+  if (result.value.used === 'local_litert') {
+    if (result.value.fallback_reason === 'unsafe_to_bypass') {
+      return `local litert-lm (${result.value.latency_ms} ms) — local hermes config not readable; bypassing through hermes' agent loop would corrupt sessions.`;
+    }
+    if (result.value.fallback_reason === 'unreachable') {
+      return `local litert-lm (${result.value.latency_ms} ms) — hermes LLM unreachable.`;
+    }
+    return `local litert-lm (${result.value.latency_ms} ms)`;
+  }
   return result.value.used;
 });
 
 const resultClass = computed(() => {
   const used = result.value?.used;
-  if (used === 'reuse_hermes_llm' || used === 'sidecar_fallback') return 'banner-ok';
+  if (used === 'reuse_hermes_llm' || used === 'local_litert') return 'banner-ok';
   if (used === 'skipped' || used === 'disabled') return 'banner-info';
   return '';
 });

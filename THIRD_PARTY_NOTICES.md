@@ -1,6 +1,6 @@
 # Third-party notices
 
-Generated 2026-05-09T19:36:12.081Z from app/package.json (production only).
+Generated 2026-05-10T05:52:15.000Z from app/package.json (production only).
 Includes the renderer + Electron app dependency tree, plus hand-curated entries for the speech sidecar.
 
 ## Sidecar bundle (Docker)
@@ -11,9 +11,8 @@ Includes the renderer + Electron app dependency tree, plus hand-curated entries 
 | Kokoro-FastAPI (cuda image only) | v0.4.0 | Apache-2.0 | remsky/Kokoro-FastAPI; Kokoro-82M weights are Apache 2.0 (hexgrad/Kokoro-82M) |
 | faster-whisper | >=1.1 | MIT | Systran/faster-whisper-* CT2 builds |
 | openWakeWord | >=0.6 | Apache-2.0 | dscripka/openWakeWord |
-| Gemma 4 E2B (paraphrase fallback) | gemma-4-E2B-it.litertlm | Gemma terms (commercial OK) | litert-community/gemma-4-E2B-it-litert-lm |
-| LiteRT-LM runtime | 0.7.3 | Apache-2.0 | google-ai-edge/LiteRT-LM |
-| litert-lm-api-server | v0.3.0 | MIT | imertz/litert-lm-api-server |
+| Gemma 4 E2B IT (paraphrase model) | gemma-4-E2B-it.litertlm | Gemma terms (commercial OK) | litert-community/gemma-4-E2B-it-litert-lm; imported by host-native `litert-lm import` on first run |
+| LiteRT-LM (host-native) | pip install litert-lm (>=0.11) | Apache-2.0 | google-ai-edge/LiteRT-LM — runs OUTSIDE the Faceplate sidecar via `make litert-up` |
 | ffmpeg | system package | LGPL-2.1+ (with build-time selectable GPL) | used for PCM → MP3 / Opus muxing |
 
 ## Faceplate app dependencies (npm)

@@ -19,6 +19,11 @@
         </q-item>
       </q-list>
       <div class="settings-meta">
+        <div class="settings-diag">
+          <q-btn flat dense no-caps size="sm" icon="bug_report" label="DevTools (this window)" @click="openDevTools('self')" />
+          <q-btn flat dense no-caps size="sm" icon="visibility" label="DevTools (avatar)" @click="openDevTools('avatar')" />
+          <q-btn flat dense no-caps size="sm" icon="restart_alt" label="Relaunch app" @click="relaunch" />
+        </div>
         <small>v{{ appVersion }} · {{ platform }}</small>
       </div>
     </aside>
@@ -105,6 +110,13 @@ const activeComponent = computed<Component>(() => {
 
 const appVersion = computed(() => window.faceplate?.platform.app_version ?? '0.0.0');
 const platform = computed(() => window.faceplate?.platform.os ?? 'unknown');
+
+function openDevTools(target: 'self' | 'avatar'): void {
+  void window.faceplate?.platform.openDevTools(target);
+}
+function relaunch(): void {
+  void window.faceplate?.platform.relaunch();
+}
 </script>
 
 <style scoped>
@@ -142,9 +154,77 @@ const platform = computed(() => window.faceplate?.platform.os ?? 'unknown');
   color: rgba(0, 0, 0, 0.5);
 }
 
+.settings-diag {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
 .settings-content {
   padding: 32px;
   overflow-y: auto;
   font: 14px/1.5 system-ui, sans-serif;
+}
+
+/*
+ * Immune to Quasar's auto dark mode. Quasar's QField/QSelect/QInput inherit
+ * from a CSS variable scheme that flips with body.body--dark — and the
+ * framework config `dark: false` doesn't reliably win against the
+ * `prefers-color-scheme: dark` cascade on macOS. Force light text + white
+ * surfaces for every form control inside the Settings page.
+ */
+.settings-page :deep(.q-field--filled .q-field__control),
+.settings-page :deep(.q-field--outlined .q-field__control) {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+.settings-page :deep(.q-field__native),
+.settings-page :deep(.q-field__input),
+.settings-page :deep(.q-field__label),
+.settings-page :deep(.q-field__prefix),
+.settings-page :deep(.q-field__suffix),
+.settings-page :deep(.q-field__marginal),
+.settings-page :deep(.q-field__messages) {
+  color: #1a1a1a;
+}
+.settings-page :deep(.q-field__label) {
+  color: rgba(0, 0, 0, 0.6);
+}
+.settings-page :deep(.q-item) {
+  color: #1a1a1a;
+}
+.settings-page :deep(.q-card) {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+</style>
+
+<!--
+  Non-scoped styles for QSelect / QMenu popups. These render in a body-level
+  Teleport portal, so the scoped `:deep` selectors above can't reach them.
+  Without this, the popup options inherit Quasar's auto-dark colors and
+  appear as white-on-white text against the white menu background.
+
+  Scoped to `.q-menu` (any QMenu in the app) — the avatar overlay window
+  doesn't open dropdown menus, so this only kicks in for the Settings UI
+  in practice.
+-->
+<style>
+.q-menu {
+  background: #ffffff !important;
+  color: #1a1a1a !important;
+}
+.q-menu .q-item {
+  color: #1a1a1a !important;
+}
+.q-menu .q-item--active,
+.q-menu .q-item.q-manual-focusable--focused {
+  color: #0c5132 !important;
+  background: rgba(34, 197, 94, 0.12) !important;
+}
+.q-menu .q-item__label {
+  color: inherit !important;
 }
 </style>

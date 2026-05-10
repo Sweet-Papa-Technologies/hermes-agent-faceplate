@@ -100,6 +100,7 @@ const platform: FaceplatePreload['platform'] = {
   app_version: process.env.npm_package_version ?? '0.0.0',
   accessibilityTrusted: () => ipcRenderer.invoke(IPC.platform.accessibilityTrusted),
   relaunch: () => ipcRenderer.invoke(IPC.platform.relaunch),
+  openDevTools: (target = 'self') => ipcRenderer.invoke(IPC.platform.openDevTools, target),
 };
 
 const api: FaceplatePreload = {

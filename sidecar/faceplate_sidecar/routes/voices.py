@@ -42,13 +42,4 @@ def list_models() -> dict[str, Any]:
         items.append({"id": m.name, "object": "model", "owned_by": "faceplate", "kind": "tts"})
     for m in cfg.asr_models:
         items.append({"id": m.name, "object": "model", "owned_by": "faceplate", "kind": "asr"})
-    if cfg.paraphrase.enabled and cfg.build != "cpu-slim":
-        items.append(
-            {
-                "id": cfg.paraphrase.file,
-                "object": "model",
-                "owned_by": "litert-community",
-                "kind": "chat",
-            }
-        )
     return {"object": "list", "data": items}

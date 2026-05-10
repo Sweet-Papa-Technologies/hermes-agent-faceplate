@@ -57,16 +57,31 @@ class PiperVoice:
 
     def synthesize_pcm(self, text: str, speed: float = 1.0) -> bytes:
         self.ensure_loaded()
-        # piper's `synthesize` writes WAV; we ask for raw bytes via its
-        # `synthesize_stream_raw` generator and concatenate. Length-rate is
-        # set via the synthesis args.
+        # Piper API drift: piper-tts 1.3+ removed `synthesize_stream_raw` in
+        # favor of `synthesize(text, syn_config=...)` which yields AudioChunk
+        # objects exposing `.audio_int16_bytes`. Older installs still have
+        # the streaming API. Try the new shape first; fall back transparently.
         chunks: list[bytes] = []
         length_scale = 1.0 / max(speed, 0.1)
-        for audio_chunk in self._voice.synthesize_stream_raw(  # type: ignore[union-attr]
-            text,
-            length_scale=length_scale,
-        ):
-            chunks.append(audio_chunk)
+        voice = self._voice
+        assert voice is not None
+        if hasattr(voice, "synthesize") and not hasattr(voice, "synthesize_stream_raw"):
+            try:
+                from piper import SynthesisConfig  # type: ignore[import-not-found]
+                syn_config = SynthesisConfig(length_scale=length_scale)
+                for audio_chunk in voice.synthesize(text, syn_config=syn_config):
+                    chunks.append(audio_chunk.audio_int16_bytes)
+            except (ImportError, TypeError):
+                # Fallback for the in-between API where SynthesisConfig isn't
+                # importable or `syn_config` kwarg isn't accepted.
+                for audio_chunk in voice.synthesize(text):
+                    chunks.append(audio_chunk.audio_int16_bytes)
+        else:
+            for audio_chunk in voice.synthesize_stream_raw(  # type: ignore[union-attr]
+                text,
+                length_scale=length_scale,
+            ):
+                chunks.append(audio_chunk)
         return b"".join(chunks)
 
 

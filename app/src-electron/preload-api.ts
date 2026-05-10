@@ -14,19 +14,55 @@ import type { FaceplateEvent } from '../src/hermes/event-schema';
 
 export type SidecarBuild = 'cpu' | 'cpu-slim' | 'cuda';
 
-export interface HermesDiscovery {
-  found: boolean;
+export interface HermesCapabilities {
+  /** Model id hermes advertises for itself (e.g. `hermes-agent` or a profile name). */
+  model?: string;
+  platform?: string;
+  auth_required?: boolean;
+  features?: {
+    chat_completions?: boolean;
+    responses_api?: boolean;
+    runs?: boolean;
+    streaming?: boolean;
+    cancellation?: boolean;
+  };
+  /** Raw upstream payload — kept around for debugging in the Settings UI. */
+  raw?: unknown;
+}
+
+export interface HermesLocalConfig {
   config_path: string;
   api_server_enabled: boolean;
   api_server_host: string;
   api_server_port: number;
-  api_key_present: boolean;
+  api_key_present_in_env: boolean;
   llm: {
     provider?: string;
     base_url?: string;
     model?: string;
     api_key_present: boolean;
   };
+}
+
+/**
+ * Discovery is split into two independent halves:
+ *
+ *   - `reachable` + `capabilities` come from an HTTP probe. Works against any
+ *     hermes deployment — local, Docker, remote.
+ *   - `local_config` is populated only when this machine happens to have read
+ *     access to `~/.hermes/config.yaml` + `.env`. It exists solely as an
+ *     opt-in optimisation for the "reuse hermes' configured LLM" paraphrase
+ *     mode (which would otherwise corrupt session memory by routing
+ *     paraphrase prompts through the agent loop).
+ */
+export interface HermesDiscovery {
+  base_url: string;
+  reachable: boolean;
+  http_status?: number;
+  capabilities?: HermesCapabilities;
+  health_status?: 'ok' | 'degraded' | 'unknown';
+  local_config_readable: boolean;
+  local_config?: HermesLocalConfig;
   warnings: string[];
 }
 
@@ -34,8 +70,14 @@ export type ConnectionTarget = 'agent' | 'llm' | 'tts' | 'asr' | 'paraphrase';
 
 export interface ParaphraseResult {
   text: string;
-  used: 'reuse_hermes_llm' | 'sidecar_fallback' | 'disabled' | 'skipped';
+  used: 'reuse_hermes_llm' | 'local_litert' | 'disabled' | 'skipped';
   latency_ms: number;
+  /**
+   * When `used` does not match the user's preferred mode, this explains why
+   * we re-routed. Set when `reuse_hermes_llm` is unavailable (no local
+   * config / unreachable provider) and we fell through to local_litert.
+   */
+  fallback_reason?: 'unsafe_to_bypass' | 'unreachable' | 'no_endpoint';
 }
 
 export interface HookPreview {
@@ -153,6 +195,12 @@ export interface FaceplatePreload {
     /** macOS only: returns trusted state for Accessibility (globalShortcut). */
     accessibilityTrusted(): Promise<boolean>;
     relaunch(): Promise<void>;
+    /**
+     * Open Chromium DevTools docked to the **calling** window. The avatar
+     * window is overlay/click-through, so right-click → Inspect doesn't work
+     * there; this lets the user pop DevTools open from the Settings UI.
+     */
+    openDevTools(target?: 'self' | 'avatar' | 'all'): Promise<void>;
   };
 }
 
@@ -208,5 +256,6 @@ export const IPC = {
   platform: {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',
     relaunch: 'faceplate:platform:relaunch',
+    openDevTools: 'faceplate:platform:open-devtools',
   },
 } as const;

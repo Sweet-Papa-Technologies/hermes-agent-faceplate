@@ -64,9 +64,8 @@ const SIDECAR_BUNDLE = [
   { name: 'Kokoro-FastAPI (cuda image only)', version: 'v0.4.0', license: 'Apache-2.0', notes: 'remsky/Kokoro-FastAPI; Kokoro-82M weights are Apache 2.0 (hexgrad/Kokoro-82M)' },
   { name: 'faster-whisper', version: '>=1.1', license: 'MIT', notes: 'Systran/faster-whisper-* CT2 builds' },
   { name: 'openWakeWord', version: '>=0.6', license: 'Apache-2.0', notes: 'dscripka/openWakeWord' },
-  { name: 'Gemma 4 E2B (paraphrase fallback)', version: 'gemma-4-E2B-it.litertlm', license: 'Gemma terms (commercial OK)', notes: 'litert-community/gemma-4-E2B-it-litert-lm' },
-  { name: 'LiteRT-LM runtime', version: '0.7.3', license: 'Apache-2.0', notes: 'google-ai-edge/LiteRT-LM' },
-  { name: 'litert-lm-api-server', version: 'v0.3.0', license: 'MIT', notes: 'imertz/litert-lm-api-server' },
+  { name: 'Gemma 4 E2B IT (paraphrase model)', version: 'gemma-4-E2B-it.litertlm', license: 'Gemma terms (commercial OK)', notes: 'litert-community/gemma-4-E2B-it-litert-lm; imported by host-native `litert-lm import` on first run' },
+  { name: 'LiteRT-LM (host-native)', version: 'pip install litert-lm (>=0.11)', license: 'Apache-2.0', notes: 'google-ai-edge/LiteRT-LM — runs OUTSIDE the Faceplate sidecar via `make litert-up`' },
   { name: 'ffmpeg', version: 'system package', license: 'LGPL-2.1+ (with build-time selectable GPL)', notes: 'used for PCM → MP3 / Opus muxing' },
 ];
 

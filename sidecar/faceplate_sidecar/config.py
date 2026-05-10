@@ -65,22 +65,6 @@ class WakeConfig:
 
 
 @dataclass
-class ParaphraseConfig:
-    enabled: bool = True
-    backend: str = "litert-lm"
-    binary: str = "/opt/litert-lm/litert_lm_main"
-    runtime_backend: str = "cpu"
-    huggingface_repo: str = "litert-community/gemma-4-E2B-it-litert-lm"
-    file: str = "gemma-4-E2B-it.litertlm"
-    cache_dir: str = "/models/litert-lm"
-    api_server_port: int = 7860
-    api_server_key: str | None = None
-    max_tokens: int = 96
-    temperature: float = 0.4
-    top_p: float = 0.95
-
-
-@dataclass
 class AuthConfig:
     bearer_token: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:*", "app://."])
@@ -95,7 +79,6 @@ class Config:
     asr_models: list[AsrModelEntry] = field(default_factory=list)
     tts_models: list[TtsModelEntry] = field(default_factory=list)
     wake: WakeConfig = field(default_factory=WakeConfig)
-    paraphrase: ParaphraseConfig = field(default_factory=ParaphraseConfig)
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -148,26 +131,10 @@ def load_config(path: Path | None = None) -> Config:
         threshold=wake_block.get("threshold", 0.5),
     )
 
-    para_block = raw.get("paraphrase_fallback", {}) or {}
-    runtime = (para_block.get("runtime") or {})
-    model = (para_block.get("model") or {})
-    api_server = (para_block.get("api_server") or {})
-    generation = (para_block.get("generation") or {})
-    paraphrase = ParaphraseConfig(
-        enabled=para_block.get("enabled", True),
-        backend=para_block.get("backend", "litert-lm"),
-        binary=runtime.get("binary", ParaphraseConfig.binary),
-        runtime_backend=runtime.get("backend", "cpu"),
-        huggingface_repo=model.get("huggingface_repo", ParaphraseConfig.huggingface_repo),
-        file=model.get("file", ParaphraseConfig.file),
-        cache_dir=model.get("cache_dir", ParaphraseConfig.cache_dir),
-        api_server_port=api_server.get("internal_port", 7860),
-        api_server_key=os.environ.get("LITERT_LM_INTERNAL_KEY")
-        or api_server.get("api_key"),
-        max_tokens=generation.get("max_tokens", 96),
-        temperature=generation.get("temperature", 0.4),
-        top_p=generation.get("top_p", 0.95),
-    )
+    # `paraphrase_fallback` block in the YAML is intentionally ignored —
+    # the paraphrase LLM lives outside the container now (host-native
+    # `litert-lm serve`). Kept tolerant so old config.yaml files don't
+    # break the loader.
 
     return Config(
         build=os.environ.get("FACEPLATE_BUILD", "cpu"),
@@ -177,7 +144,6 @@ def load_config(path: Path | None = None) -> Config:
         asr_models=asr_models,
         tts_models=tts_models,
         wake=wake,
-        paraphrase=paraphrase,
     )
 
 

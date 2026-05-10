@@ -85,7 +85,17 @@ function isLocalUrl(url: string): boolean {
 
 const egress = computed<EgressRow[]>(() => {
   const s = settings.settings;
-  const llmUrl = discovery.discovery?.llm.base_url ?? '(not discovered)';
+  const localLlmUrl = discovery.discovery?.local_config?.llm.base_url;
+  const localReadable = discovery.discovery?.local_config_readable ?? false;
+
+  // Paraphrase routing:
+  //   'reuse_hermes_llm' AND local config readable → direct to user's LLM
+  //   otherwise → host-native litert-lm (default 127.0.0.1:7860)
+  const wantsBypass = s.paraphrase.model === 'reuse_hermes_llm';
+  const bypassActive = wantsBypass && localReadable && Boolean(localLlmUrl);
+  const paraphraseEndpoint = bypassActive ? localLlmUrl! : s.paraphrase.litert_lm_url;
+  const paraphraseLocal = isLocalUrl(paraphraseEndpoint);
+
   return [
     {
       id: 'agent',
@@ -96,17 +106,17 @@ const egress = computed<EgressRow[]>(() => {
     },
     {
       id: 'llm',
-      label: 'LLM provider (chosen by hermes-agent)',
-      when: 'Every assistant token',
-      endpoint: llmUrl,
-      local: isLocalUrl(llmUrl),
+      label: 'LLM provider (chosen by hermes-agent server-side)',
+      when: 'Every assistant token (proxied through hermes)',
+      endpoint: localLlmUrl ?? '(server-side; not visible from this client)',
+      local: localLlmUrl ? isLocalUrl(localLlmUrl) : false,
     },
     {
       id: 'paraphrase',
-      label: 'Paraphrase pass',
+      label: bypassActive ? 'Paraphrase (direct to hermes\' LLM)' : 'Paraphrase (host-native litert-lm)',
       when: `When response > ${s.paraphrase.trigger_chars} chars`,
-      endpoint: s.paraphrase.model === 'sidecar_fallback' ? s.speech.sidecar_url : llmUrl,
-      local: s.paraphrase.model === 'sidecar_fallback' ? isLocalUrl(s.speech.sidecar_url) : isLocalUrl(llmUrl),
+      endpoint: paraphraseEndpoint,
+      local: paraphraseLocal,
     },
     {
       id: 'sidecar',
@@ -117,7 +127,7 @@ const egress = computed<EgressRow[]>(() => {
     },
     {
       id: 'updater',
-      label: 'Auto-updater (deferred — Phase 6)',
+      label: 'Auto-updater (deferred)',
       when: 'Every 4 h when running',
       endpoint: 'github.com/releases',
       local: false,

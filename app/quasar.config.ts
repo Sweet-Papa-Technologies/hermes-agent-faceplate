@@ -94,7 +94,11 @@ export default defineConfig((ctx) => {
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#framework
     framework: {
-      config: {},
+      // Force light mode for Quasar components by default. The avatar overlay
+      // and the wizard page apply their own dark-mode CSS; the Settings page
+      // is light. Without this, Quasar follows the OS color scheme and macOS
+      // dark mode produces white text on the white Settings background.
+      config: { dark: false },
 
       // iconSet: 'material-icons', // Quasar icon set
       // lang: 'en-US', // Quasar language pack

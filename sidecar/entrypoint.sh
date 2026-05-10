@@ -6,25 +6,49 @@ set -euo pipefail
 
 : "${FACEPLATE_BUILD:=cpu}"
 : "${FACEPLATE_API_KEY:=}"
+export FACEPLATE_BUILD FACEPLATE_API_KEY
 
 # Ensure model + voice + wakeword cache dirs exist (volumes may be empty on
 # first run).
-mkdir -p /models /voices /wakewords /etc/faceplate-sidecar /models/litert-lm
+mkdir -p /models /voices /wakewords /etc/faceplate-sidecar
 
-# Persist the LiteRT-LM internal token across container restarts. Without
-# this the chat-completions reverse proxy reads a stale value from a config
-# snapshot taken at the previous startup.
-KEY_FILE="/models/litert-lm/internal-key"
-if [ -z "${LITERT_LM_INTERNAL_KEY:-}" ]; then
-  if [ -f "${KEY_FILE}" ]; then
-    LITERT_LM_INTERNAL_KEY="$(cat "${KEY_FILE}")"
-  else
-    LITERT_LM_INTERNAL_KEY="$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | xxd -p)"
-    printf '%s' "${LITERT_LM_INTERNAL_KEY}" > "${KEY_FILE}"
-    chmod 600 "${KEY_FILE}"
+# Bootstrap the default Piper voice on first start. faster-whisper auto-pulls
+# from HF on first request, but Piper voices have to be present at synthesis
+# time — there's no lazy fetch. Skip if the voice is already in the volume.
+bootstrap_piper_voice() {
+  local voice="${PIPER_DEFAULT_VOICE:-en_US-amy-medium}"
+  local onnx="/voices/${voice}.onnx"
+  local config="/voices/${voice}.onnx.json"
+  if [ -f "${onnx}" ] && [ -f "${config}" ]; then
+    return 0
   fi
-fi
-export FACEPLATE_BUILD FACEPLATE_API_KEY LITERT_LM_INTERNAL_KEY
+  # Map voice id → HF subpath. Format is rhasspy/piper-voices/<lang>/<locale>/<speaker>/<quality>/<voice>.onnx
+  # The default 'en_US-amy-medium' lives under en/en_US/amy/medium/.
+  local lang locale speaker quality
+  lang="${voice%%_*}"           # en
+  locale="${voice%-*}"          # en_US-amy
+  locale="${locale%-*}"         # en_US
+  speaker_quality="${voice#*-}" # amy-medium
+  speaker="${speaker_quality%-*}"  # amy
+  quality="${speaker_quality##*-}" # medium
+  local hf_base="https://huggingface.co/rhasspy/piper-voices/resolve/main/${lang}/${locale}/${speaker}/${quality}"
+  echo "[faceplate-sidecar] bootstrapping Piper voice: ${voice}"
+  if ! curl -fsSL "${hf_base}/${voice}.onnx" -o "${onnx}.tmp"; then
+    echo "[faceplate-sidecar] WARN: failed to download ${voice}.onnx — TTS will fail until you drop one into the faceplate-voices volume."
+    rm -f "${onnx}.tmp"
+    return 0
+  fi
+  mv "${onnx}.tmp" "${onnx}"
+  if ! curl -fsSL "${hf_base}/${voice}.onnx.json" -o "${config}.tmp"; then
+    echo "[faceplate-sidecar] WARN: failed to download ${voice}.onnx.json"
+    rm -f "${config}.tmp"
+    return 0
+  fi
+  mv "${config}.tmp" "${config}"
+  echo "[faceplate-sidecar] Piper voice ready at ${onnx}"
+}
+
+bootstrap_piper_voice
 
 # Print startup banner so docker-compose logs are interpretable.
 echo "[faceplate-sidecar] build=${FACEPLATE_BUILD} starting on :8080"

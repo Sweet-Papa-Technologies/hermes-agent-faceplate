@@ -1,6 +1,8 @@
 # Faceplate sidecar — :cuda build (NVIDIA 8 GB+ VRAM).
-# Adds Kokoro-FastAPI for premium TTS, faster-whisper fp16 GPU paths, and
-# the GPU build of LiteRT-LM (ML Drift on Linux/Windows).
+# Adds faster-whisper fp16 GPU paths. The LLM (paraphrase fallback) runs
+# OUTSIDE the container as host-native `litert-lm serve` — see
+# scripts/start-litert.sh. On the host you can opt into the GPU backend
+# with `LITERT_BACKEND=gpu make litert-up`.
 
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
@@ -18,8 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
         ca-certificates \
-        nodejs \
-        npm \
         git \
         openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -36,37 +36,17 @@ RUN pip install .
 # silently runs on CPU even though the image is :cuda.
 RUN pip install --force-reinstall --no-deps "ctranslate2>=4.4"
 
+# See Dockerfile.cpu for why --no-deps openwakeword.
+RUN pip install --no-deps "openwakeword>=0.6"
+
 COPY faceplate_sidecar/ /app/faceplate_sidecar/
 RUN pip install --no-deps -e .
-
-# Kokoro-FastAPI is referenced by the design but no backend wires it yet
-# (TODO §6.2 v1.x). Pull only when actually needed; current image skips it
-# to avoid dead weight in the layer cache.
-# ARG KOKORO_FASTAPI_REF=v0.4.0
-# RUN git clone --depth 1 --branch "${KOKORO_FASTAPI_REF}" \
-#       https://github.com/remsky/Kokoro-FastAPI.git \
-#       /opt/kokoro-fastapi
-
-# litert-lm-api-server (same as cpu build)
-ARG LITERT_LM_API_SERVER_REF=v0.3.0
-RUN git clone --depth 1 --branch "${LITERT_LM_API_SERVER_REF}" \
-      https://github.com/imertz/litert-lm-api-server.git \
-      /opt/litert-lm-api-server \
-    && cd /opt/litert-lm-api-server \
-    && npm install --omit=dev
-
-ARG LITERT_LM_BINARY_VERSION=0.7.3
-RUN mkdir -p /opt/litert-lm \
-    && curl -fsSL "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v${LITERT_LM_BINARY_VERSION}/litert_lm_main_linux_x86_64_gpu" \
-       -o /opt/litert-lm/litert_lm_main \
-    && chmod +x /opt/litert-lm/litert_lm_main
 
 COPY config.example.yaml /etc/faceplate-sidecar/config.yaml
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV FACEPLATE_BUILD=cuda
-ENV LITERT_LM_BACKEND=gpu
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

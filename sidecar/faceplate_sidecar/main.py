@@ -1,39 +1,26 @@
-"""FastAPI entrypoint. Wires routes, CORS, and the lifespan hook that spawns
-the LiteRT-LM subprocess (when enabled).
+"""FastAPI entrypoint. Wires routes + CORS.
+
+The sidecar exposes only the audio/wake-word surface. The LLM (paraphrase
+fallback) runs OUTSIDE the container as host-native `litert-lm serve` —
+see scripts/start-litert.sh. The Faceplate's paraphrase pass talks to
+the host LiteRT-LM URL directly (default http://127.0.0.1:7860/v1).
 """
 from __future__ import annotations
 
 import logging
 import os
 import re
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .backends.litert_lm import LiteRtLmProcess
 from .config import get_config
 from .health import collect_status
-from .routes import asr, chat, tts, voices, wake
+from .routes import asr, tts, voices, wake
 
 
 _log = logging.getLogger("faceplate_sidecar.main")
-_litert: LiteRtLmProcess | None = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    cfg = get_config()
-    global _litert
-    if cfg.paraphrase.enabled and cfg.build != "cpu-slim":
-        _litert = LiteRtLmProcess(cfg.paraphrase)
-        _litert.start()
-    try:
-        yield
-    finally:
-        if _litert is not None:
-            await _litert.stop_async()
 
 
 def create_app() -> FastAPI:
@@ -50,7 +37,6 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="HermesAgent Faceplate Speech Sidecar",
         version=__import__("faceplate_sidecar").__version__,
-        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -60,11 +46,11 @@ def create_app() -> FastAPI:
         **cors_kwargs,
     )
 
-    # Routes
+    # Routes — audio + wake only. /v1/chat/completions intentionally absent
+    # (use the host litert-lm at 127.0.0.1:7860 directly).
     app.include_router(tts.router)
     app.include_router(asr.router)
     app.include_router(wake.router)
-    app.include_router(chat.router)
     app.include_router(voices.router)
 
     # Health
@@ -87,7 +73,6 @@ def _build_cors_kwargs(origins: list[str]) -> dict[str, Any]:
     patterns: list[str] = []
     for origin in origins:
         if "*" in origin:
-            # http://localhost:* → http://localhost(:\d+)?
             pattern = re.escape(origin).replace(r"\*", r"\d+")
             patterns.append(f"^{pattern}$")
         else:

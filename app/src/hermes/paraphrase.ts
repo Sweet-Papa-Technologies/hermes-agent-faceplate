@@ -7,8 +7,9 @@ export interface ParaphraseRequest {
 
 export interface ParaphraseOutcome {
   text: string;
-  used: 'reuse_hermes_llm' | 'sidecar_fallback' | 'disabled' | 'skipped';
+  used: 'reuse_hermes_llm' | 'local_litert' | 'disabled' | 'skipped';
   latency_ms: number;
+  fallback_reason?: 'unsafe_to_bypass' | 'unreachable' | 'no_endpoint';
 }
 
 export async function paraphrase(text: string): Promise<ParaphraseOutcome> {

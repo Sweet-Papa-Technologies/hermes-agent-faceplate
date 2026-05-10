@@ -5,7 +5,7 @@ import { ipcMain, net } from 'electron';
 
 import { IPC, type ConnectionTarget, type TestResult } from './preload-api';
 import { getSettings } from './settings-store';
-import { discoverHermes, readApiServerKey, readLlmEndpoint } from './hermes-discovery';
+import { readApiServerKey, readLlmEndpoint } from './hermes-discovery';
 
 const TIMEOUT_MS = 5_000;
 
@@ -15,17 +15,44 @@ async function timed<T>(fn: () => Promise<T>): Promise<{ value: T; latency_ms: n
   return { value, latency_ms: Date.now() - start };
 }
 
+function isLocalNetwork(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || h === '::1') return true;
+    // 127.0.0.0/8
+    if (/^127\./.test(h)) return true;
+    // RFC 1918 private IPv4 — covers home LANs, Docker bridges, cgnat-style setups.
+    if (/^10\./.test(h)) return true;
+    if (/^192\.168\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+    // Link-local
+    if (/^169\.254\./.test(h)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchJson(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<{ status: number; body: string }> {
-  // Electron's `net.fetch` follows the system proxy + cert store; it's
-  // strictly preferable to the renderer's `fetch` when we run from main.
-  // The signature matches the standard fetch.
+  // Pick the right fetch:
+  //   - loopback / RFC1918 (litert-lm, sidecar via host port, hermes pointing
+  //     at a LAN LLM at 192.168.x): use Node's built-in fetch so we bypass
+  //     Chromium's PAC/proxy config. Several macOS setups (Little Snitch,
+  //     CleanMyMac, corp PAC) intercept private-network traffic and net.fetch
+  //     surfaces the result as ERR_ADDRESS_UNREACHABLE.
+  //   - everything else (remote hermes / external LLM): keep electron.net.fetch
+  //     so we follow the system cert store + proxy intentionally.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? TIMEOUT_MS);
+  const useNode = isLocalNetwork(url);
+  console.log(`[hermes-tester] fetch ${url} via ${useNode ? 'node-undici' : 'electron.net'}`);
+  const doFetch = useNode ? fetch : net.fetch;
   try {
-    const res = await net.fetch(url, { ...init, signal: controller.signal });
+    const res = await doFetch(url, { ...init, signal: controller.signal });
     const body = await res.text();
     return { status: res.status, body };
   } finally {
@@ -76,7 +103,11 @@ async function testAgent(): Promise<TestResult> {
 async function testLlm(): Promise<TestResult> {
   const llm = readLlmEndpoint();
   if (!llm) {
-    return { ok: false, latency_ms: 0, error: 'No LLM endpoint discovered in hermes config.' };
+    return {
+      ok: false,
+      latency_ms: 0,
+      error: 'No local hermes config found. The "Reuse hermes\' LLM" paraphrase mode requires read access to ~/.hermes/. Use the sidecar fallback for Docker / remote installs.',
+    };
   }
   if (!llm.model) {
     return { ok: false, latency_ms: 0, error: 'hermes-agent config has no model.default set.' };
@@ -106,11 +137,27 @@ async function testTts(): Promise<TestResult> {
   const base = settings.speech.sidecar_url.replace(/\/+$/, '');
   const headers: Record<string, string> = {};
   if (settings.speech.sidecar_token) headers.authorization = `Bearer ${settings.speech.sidecar_token}`;
+  let lastStatus = 0;
+  let lastLatency = 0;
+  let lastBody = '';
   for (const url of [`${base}/voices`, `${base}/v1/voices`, `${base}/v1/models`]) {
     const { value, latency_ms } = await timed(() => fetchJson(url, { headers }));
     if (value.status >= 200 && value.status < 300) {
       return { ok: true, latency_ms, detail: value.body.slice(0, 240) };
     }
+    lastStatus = value.status;
+    lastLatency = latency_ms;
+    lastBody = value.body;
+  }
+  if (lastStatus === 401 || lastStatus === 403) {
+    return {
+      ok: false,
+      latency_ms: lastLatency,
+      error: `HTTP ${lastStatus}: ${lastBody.slice(0, 200)} — paste the FACEPLATE_API_KEY printed by \`make setup\` into Settings → Speech Sidecar → Bearer token.`,
+    };
+  }
+  if (lastStatus > 0) {
+    return { ok: false, latency_ms: lastLatency, error: `HTTP ${lastStatus}: ${lastBody.slice(0, 240)}` };
   }
   return { ok: false, latency_ms: 0, error: 'Sidecar TTS endpoint unreachable.' };
 }
@@ -142,7 +189,7 @@ async function testParaphrase(): Promise<TestResult> {
     return { ok: false, latency_ms: 0, error: 'Paraphrase disabled in settings.' };
   }
 
-  // Mode 'reuse_hermes_llm' tests the same endpoint as testLlm, since that's
+  // 'reuse_hermes_llm' tests the same endpoint as testLlm, since that's
   // exactly what paraphrase will hit at runtime.
   if (settings.paraphrase.model === 'reuse_hermes_llm') {
     const r = await testLlm();
@@ -150,21 +197,34 @@ async function testParaphrase(): Promise<TestResult> {
     return r;
   }
 
-  // 'sidecar_fallback' — hits the sidecar's /v1/chat/completions which is
-  // proxied to litert-lm-api-server in the bundled image.
-  const base = settings.speech.sidecar_url.replace(/\/+$/, '');
-  const url = `${base}/v1/chat/completions`;
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (settings.speech.sidecar_token) headers.authorization = `Bearer ${settings.speech.sidecar_token}`;
+  // 'local_litert' — POSTs to host-native `litert-lm serve --api openai` at
+  // the URL set in settings.paraphrase.litert_lm_url (default
+  // http://127.0.0.1:7860/v1). litert-lm 0.11 only exposes the **Responses**
+  // API on this mode, not Chat Completions, so we POST to /responses with
+  // the Responses-shaped body.
+  const base = settings.paraphrase.litert_lm_url.replace(/\/+$/, '');
+  const url = `${base}/responses`;
   const body = JSON.stringify({
-    model: 'gemma-4-e2b-it',
-    messages: [{ role: 'user', content: 'ping' }],
-    max_tokens: 1,
-    stream: false,
+    model: 'gemma-4-E2B-it',
+    input: 'ping',
+    max_output_tokens: 1,
   });
-  const { value, latency_ms } = await timed(() => fetchJson(url, { method: 'POST', headers, body }));
+  const { value, latency_ms } = await timed(() =>
+    fetchJson(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    }),
+  );
   if (value.status >= 200 && value.status < 300) {
     return { ok: true, latency_ms, detail: value.body.slice(0, 240) };
+  }
+  if (value.status === 0) {
+    return {
+      ok: false,
+      latency_ms,
+      error: `litert-lm not reachable at ${base}. Run \`make litert-up\` on the host first.`,
+    };
   }
   return { ok: false, latency_ms, error: `HTTP ${value.status}: ${value.body.slice(0, 240)}` };
 }

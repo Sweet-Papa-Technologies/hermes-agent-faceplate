@@ -2,7 +2,7 @@
   <div>
     <h2>Speech Sidecar</h2>
     <p class="muted">
-      The bundled Docker sidecar exposes OpenAI-compatible TTS, ASR, wake-word, and a paraphrase fallback. You can also point at any external URL that satisfies the same shape.
+      The bundled Docker sidecar exposes OpenAI-compatible TTS, ASR, and wake-word. You can also point at any external URL that satisfies the same shape. (The paraphrase LLM lives outside this container — see Settings → Paraphrase.)
     </p>
 
     <q-card flat bordered class="card">
@@ -227,8 +227,8 @@ const modeOptions = [
 ];
 
 const imageOptions = [
-  { label: 'cpu — full (incl. paraphrase fallback, 4 GB)', value: 'cpu' },
-  { label: 'cpu-slim — no paraphrase (1.4 GB)', value: 'cpu-slim' },
+  { label: 'cpu — TTS + ASR + wake-word (~1.4 GB)', value: 'cpu' },
+  { label: 'cpu-slim — same as cpu (kept for backward compat)', value: 'cpu-slim' },
   { label: 'cuda — GPU (8 GB+ VRAM)', value: 'cuda' },
 ];
 

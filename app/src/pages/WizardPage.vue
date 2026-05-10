@@ -25,58 +25,44 @@
         </q-stepper-navigation>
       </q-step>
 
-      <q-step :name="1" title="Find hermes-agent" icon="hub" :done="step > 1">
-        <p v-if="!discovery.discovery">Looking for <code>~/.hermes/config.yaml</code>…</p>
+      <q-step :name="1" title="Connect to hermes-agent" icon="hub" :done="step > 1">
+        <p>
+          Paste the URL where hermes-agent's API server is reachable, plus the bearer token. Works against any deployment — local, Docker, or remote.
+        </p>
+        <q-input v-model="hermesUrl" label="Gateway URL" filled stack-label hint="e.g. http://127.0.0.1:8642/v1" />
+        <q-input
+          v-model="hermesKey"
+          class="q-mt-sm"
+          label="API_SERVER_KEY"
+          :type="showKey ? 'text' : 'password'"
+          filled
+          stack-label
+          hint="Set in your hermes-agent .env. Required for non-loopback URLs."
+        >
+          <template #append>
+            <q-btn flat dense round :icon="showKey ? 'visibility_off' : 'visibility'" @click="showKey = !showKey" />
+          </template>
+        </q-input>
+        <p v-if="!discovery.discovery" class="muted q-mt-md">Probing…</p>
         <template v-else>
-          <q-banner v-if="discovery.discovery.found" class="ok">
+          <q-banner v-if="discovery.discovery.reachable" class="ok q-mt-md">
             <template #avatar><q-icon name="check_circle" color="positive" /></template>
-            Found at <code>{{ discovery.discovery.config_path }}</code>.
+            Reachable at <code>{{ discovery.discovery.base_url }}</code>{{ capabilityBlurb }}.
           </q-banner>
-          <q-banner v-else class="warn">
+          <q-banner v-else class="warn q-mt-md">
             <template #avatar><q-icon name="warning" color="warning" /></template>
             <span>
-              No hermes-agent config detected.
-              <a href="https://github.com/NousResearch/hermes-agent" target="_blank">Install hermes-agent</a>,
-              then click Re-discover.
+              Couldn't reach hermes at <code>{{ discovery.discovery.base_url }}</code>{{ discovery.discovery.http_status ? ` (HTTP ${discovery.discovery.http_status})` : '' }}.
+              Check the URL, the token, and that hermes-agent is running with <code>API_SERVER_ENABLED=true</code>.
             </span>
           </q-banner>
-          <q-list bordered class="q-mt-md">
-            <q-item>
-              <q-item-section><q-item-label>API server enabled</q-item-label></q-item-section>
-              <q-item-section side>
-                <q-icon
-                  :name="discovery.discovery.api_server_enabled ? 'check_circle' : 'cancel'"
-                  :color="discovery.discovery.api_server_enabled ? 'positive' : 'negative'"
-                />
-              </q-item-section>
-            </q-item>
-            <q-item>
-              <q-item-section><q-item-label>API key present</q-item-label></q-item-section>
-              <q-item-section side>
-                <q-icon
-                  :name="discovery.discovery.api_key_present ? 'check_circle' : 'cancel'"
-                  :color="discovery.discovery.api_key_present ? 'positive' : 'negative'"
-                />
-              </q-item-section>
-            </q-item>
-            <q-item v-if="discovery.discovery.llm.model">
-              <q-item-section><q-item-label>Discovered LLM</q-item-label></q-item-section>
-              <q-item-section side>{{ discovery.discovery.llm.model }} ({{ discovery.discovery.llm.provider ?? 'custom' }})</q-item-section>
-            </q-item>
-          </q-list>
-          <q-banner
-            v-if="!discovery.discovery.api_server_enabled || !discovery.discovery.api_key_present"
-            class="warn q-mt-md"
-            dense
-          >
-            Add to <code>~/.hermes/.env</code>:
-            <pre class="snippet">API_SERVER_ENABLED=true
-API_SERVER_KEY=&lt;a long random string&gt;</pre>
-            Then restart hermes-agent and re-discover.
+          <q-banner v-if="discovery.discovery.local_config_readable" class="info q-mt-sm" dense>
+            <template #avatar><q-icon name="folder" color="primary" /></template>
+            Local <code>~/.hermes/</code> also detected — the "Reuse hermes' LLM" paraphrase mode is available as an opt-in.
           </q-banner>
         </template>
         <q-stepper-navigation>
-          <q-btn outline no-caps label="Re-discover" :loading="discovery.loading" @click="discovery.refresh()" />
+          <q-btn outline no-caps label="Re-probe" :loading="discovery.loading" @click="discovery.refresh()" />
           <q-btn color="primary" no-caps label="Continue" class="q-ml-sm" @click="goNext" />
         </q-stepper-navigation>
       </q-step>
@@ -109,10 +95,14 @@ API_SERVER_KEY=&lt;a long random string&gt;</pre>
         <p>Verify the connections — anything red is fixable later in Settings.</p>
         <div class="row q-col-gutter-md">
           <div class="col-12"><TestConnectionButton target="agent" label="hermes-agent" /></div>
-          <div class="col-12"><TestConnectionButton target="llm" label="LLM" /></div>
+          <div v-if="paraphraseMode === 'reuse_hermes_llm'" class="col-12">
+            <TestConnectionButton target="llm" label="LLM (hermes' configured backend)" />
+          </div>
           <div class="col-12"><TestConnectionButton target="tts" label="TTS sidecar" /></div>
           <div class="col-12"><TestConnectionButton target="asr" label="ASR sidecar" /></div>
-          <div class="col-12"><TestConnectionButton target="paraphrase" label="Paraphrase" /></div>
+          <div v-if="paraphraseMode !== 'disabled'" class="col-12">
+            <TestConnectionButton target="paraphrase" label="Paraphrase" />
+          </div>
         </div>
         <q-stepper-navigation>
           <q-btn flat no-caps label="Back" @click="goBack" />
@@ -163,10 +153,21 @@ const discovery = useDiscoveryStore();
 
 const sidecarMode = useSetting('speech.sidecar_mode');
 const sidecarImage = useSetting('speech.sidecar_image');
+const paraphraseMode = useSetting('paraphrase.model');
 const inputMode = useSetting('input.mode');
 const avatarMode = useSetting('avatar.mode');
 const wizardCompleted = useSetting('wizard.completed');
 const wizardStep = useSetting('wizard.last_step');
+
+const hermesUrl = useSetting('hermes.base_url');
+const hermesKey = useSetting('hermes.api_key');
+const showKey = ref(false);
+
+const capabilityBlurb = computed(() => {
+  const caps = discovery.discovery?.capabilities;
+  if (!caps?.model) return '';
+  return ` (model: ${caps.model})`;
+});
 
 const sidecarModeOptions = [
   { label: 'Bundled Docker container (recommended)', value: 'bundled' },

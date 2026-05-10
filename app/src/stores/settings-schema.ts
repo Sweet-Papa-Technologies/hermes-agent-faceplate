@@ -25,13 +25,35 @@ export const HermesSettings = z.object({
   install_shell_hook: z.boolean().default(false),
 });
 
+// Paraphrase model routing.
+//
+//   local_litert     → POST to host-native `litert-lm serve` (default).
+//                       URL is paraphrase.litert_lm_url, default
+//                       http://127.0.0.1:7860/v1.
+//                       Started outside the Faceplate via `make litert-up`.
+//   reuse_hermes_llm → POST direct to the underlying LLM provider hermes is
+//                       configured with. Requires read access to local
+//                       ~/.hermes/ to pick up provider/base_url/api_key.
+//                       Bypasses hermes-agent's /v1/chat/completions because
+//                       that runs the agent loop (would corrupt session memory).
+//   disabled         → never paraphrase; speak the full text.
+const ParaphraseModelEnum = z.enum(['local_litert', 'reuse_hermes_llm', 'disabled']);
+
+// Backward-compat: existing settings.yaml files may carry the legacy
+// 'sidecar_fallback' value. Map it to 'local_litert' on read.
+const paraphraseModelInput = z.preprocess(
+  (v) => (v === 'sidecar_fallback' ? 'local_litert' : v),
+  ParaphraseModelEnum,
+);
+
 export const ParaphraseSettings = z.object({
   enabled: z.boolean().default(true),
   trigger_chars: z.number().int().nonnegative().default(280),
   target_words: z.number().int().positive().default(25),
-  model: z
-    .enum(['reuse_hermes_llm', 'sidecar_fallback', 'disabled'])
-    .default('reuse_hermes_llm'),
+  model: paraphraseModelInput.default('local_litert'),
+  /** Endpoint the local_litert mode posts to. Defaults to the litert-lm
+   *  serve port set by scripts/start-litert.sh. */
+  litert_lm_url: z.string().url().default('http://127.0.0.1:7860/v1'),
   system_prompt: z
     .string()
     .default(

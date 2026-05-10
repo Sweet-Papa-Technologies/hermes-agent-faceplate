@@ -23,8 +23,7 @@ def collect_status() -> dict[str, object]:
         models[f"asr.{m.name}"] = backends.asr_status(m.name)
     for w in cfg.wake.models:
         models[f"wake.{os.path.basename(w)}"] = backends.wake_status(w)
-    if cfg.paraphrase.enabled and cfg.build != "cpu-slim":
-        models[f"paraphrase.{cfg.paraphrase.file}"] = backends.litert_lm_status()
+    # Paraphrase LLM is host-native (litert-lm serve), not in this container.
 
     ram_mb = _resident_ram_mb()
     return {

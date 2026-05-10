@@ -35,25 +35,62 @@
       </q-card-section>
     </q-card>
 
-    <h3>Discovered LLM</h3>
+    <h3>Hermes capabilities</h3>
     <q-card flat bordered class="card">
       <q-list>
         <q-item>
-          <q-item-section><q-item-label>Provider</q-item-label></q-item-section>
-          <q-item-section side>{{ d?.llm.provider ?? '—' }}</q-item-section>
-        </q-item>
-        <q-item>
-          <q-item-section><q-item-label>Base URL</q-item-label></q-item-section>
-          <q-item-section side>{{ d?.llm.base_url ?? '—' }}</q-item-section>
-        </q-item>
-        <q-item>
-          <q-item-section><q-item-label>Model</q-item-label></q-item-section>
-          <q-item-section side>{{ d?.llm.model ?? '—' }}</q-item-section>
-        </q-item>
-        <q-item>
-          <q-item-section><q-item-label>API key present</q-item-label></q-item-section>
+          <q-item-section>
+            <q-item-label>Reachable</q-item-label>
+            <q-item-label caption>HTTP probe against {{ d?.base_url ?? '—' }}</q-item-label>
+          </q-item-section>
           <q-item-section side>
-            <q-icon :name="d?.llm.api_key_present ? 'check_circle' : 'cancel'" :color="d?.llm.api_key_present ? 'positive' : 'negative'" />
+            <q-icon
+              :name="d?.reachable ? 'check_circle' : 'cancel'"
+              :color="d?.reachable ? 'positive' : 'negative'"
+            />
+          </q-item-section>
+        </q-item>
+        <q-item v-if="d?.capabilities?.model">
+          <q-item-section><q-item-label>Hermes model id</q-item-label></q-item-section>
+          <q-item-section side>{{ d.capabilities.model }}</q-item-section>
+        </q-item>
+        <q-item v-if="d?.capabilities?.platform">
+          <q-item-section><q-item-label>Platform</q-item-label></q-item-section>
+          <q-item-section side>{{ d.capabilities.platform }}</q-item-section>
+        </q-item>
+        <q-item v-if="featureChips.length">
+          <q-item-section><q-item-label>Features</q-item-label></q-item-section>
+          <q-item-section side>
+            <div class="row q-gutter-xs">
+              <q-chip v-for="f in featureChips" :key="f" dense size="sm">{{ f }}</q-chip>
+            </div>
+          </q-item-section>
+        </q-item>
+      </q-list>
+    </q-card>
+
+    <h3>Local config (optional)</h3>
+    <q-card flat bordered class="card">
+      <q-card-section v-if="!d?.local_config_readable" class="muted">
+        <q-icon name="info" /> Local <code>~/.hermes/</code> not readable from this machine. Faceplate runs in HTTP-only mode — chat works against any remote / Docker hermes. The "Reuse hermes' LLM" paraphrase option is unavailable; the sidecar fallback is used instead (zero-config and session-safe).
+      </q-card-section>
+      <q-list v-else>
+        <q-item>
+          <q-item-section><q-item-label>Provider</q-item-label></q-item-section>
+          <q-item-section side>{{ d?.local_config?.llm.provider ?? '—' }}</q-item-section>
+        </q-item>
+        <q-item>
+          <q-item-section><q-item-label>LLM base URL</q-item-label></q-item-section>
+          <q-item-section side>{{ d?.local_config?.llm.base_url ?? '—' }}</q-item-section>
+        </q-item>
+        <q-item>
+          <q-item-section><q-item-label>LLM model</q-item-label></q-item-section>
+          <q-item-section side>{{ d?.local_config?.llm.model ?? '—' }}</q-item-section>
+        </q-item>
+        <q-item>
+          <q-item-section><q-item-label>LLM API key present</q-item-label></q-item-section>
+          <q-item-section side>
+            <q-icon :name="d?.local_config?.llm.api_key_present ? 'check_circle' : 'cancel'" :color="d?.local_config?.llm.api_key_present ? 'positive' : 'negative'" />
           </q-item-section>
         </q-item>
       </q-list>
@@ -108,7 +145,19 @@ const d = computed(() => discovery.discovery);
 
 const apiKeyHint = computed(() => {
   if (apiKey.value) return 'Present.';
-  return 'Set API_SERVER_KEY in ~/.hermes/.env, or paste here.';
+  return 'Paste your API_SERVER_KEY here. (Local installs can also leave this blank if it\'s already set in ~/.hermes/.env.)';
+});
+
+const featureChips = computed(() => {
+  const f = d.value?.capabilities?.features;
+  if (!f) return [];
+  const out: string[] = [];
+  if (f.chat_completions) out.push('chat_completions');
+  if (f.responses_api) out.push('responses_api');
+  if (f.runs) out.push('runs');
+  if (f.streaming) out.push('streaming');
+  if (f.cancellation) out.push('cancellation');
+  return out;
 });
 
 function onHookToggle(value: boolean): void {

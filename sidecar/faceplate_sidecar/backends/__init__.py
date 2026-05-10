@@ -10,7 +10,6 @@ ModelStatus = Literal["loaded", "idle", "error"]
 _tts_status: dict[str, ModelStatus] = {}
 _asr_status: dict[str, ModelStatus] = {}
 _wake_status: dict[str, ModelStatus] = {}
-_litert_status: ModelStatus = "idle"
 
 
 def tts_status(name: str) -> ModelStatus:
@@ -25,10 +24,6 @@ def wake_status(path: str) -> ModelStatus:
     return _wake_status.get(path, "idle")
 
 
-def litert_lm_status() -> ModelStatus:
-    return _litert_status
-
-
 def mark_tts(name: str, status: ModelStatus) -> None:
     _tts_status[name] = status
 
@@ -39,8 +34,3 @@ def mark_asr(name: str, status: ModelStatus) -> None:
 
 def mark_wake(path: str, status: ModelStatus) -> None:
     _wake_status[path] = status
-
-
-def mark_litert_lm(status: ModelStatus) -> None:
-    global _litert_status
-    _litert_status = status

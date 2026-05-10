@@ -61,6 +61,8 @@ export async function startRun(opts: StartRunOptions): Promise<RunHandle> {
   const startBody: Record<string, unknown> = { input: opts.input };
   if (opts.endpoint.sessionId) startBody.session_id = opts.endpoint.sessionId;
 
+  console.log('[runs-client] POST', url, 'auth=', headers.authorization ? `Bearer …${(headers.authorization as string).slice(-6)}` : '(none)');
+
   const res = await fetch(url, {
     method: 'POST',
     headers,
@@ -126,12 +128,31 @@ async function* consumeEvents(
         const parsed = parseSseEvent(evt);
         if (!parsed) continue;
         // Untagged `[DONE]` (OpenAI-style sentinel) terminates the stream
-        // even when no `event: done` tag is sent — without this the loop
+        // even when no terminal event tag is sent — without this the loop
         // can deadlock on servers that keep the connection open after
         // the final chunk.
         if (parsed.data === '[DONE]') return;
         yield* mapEvent(parsed);
-        if (parsed.event === 'final' || parsed.event === 'done' || parsed.event === 'error') {
+        // Detect terminal events. hermes uses JSON-embedded discriminators:
+        // {"event": "run.completed"|"run.failed"} → connection closes after.
+        // Older / OpenAI-shaped servers tag the SSE event itself.
+        const sseTag = parsed.event ?? '';
+        let jsonTag = '';
+        try {
+          const j = JSON.parse(parsed.data) as { event?: unknown };
+          if (typeof j.event === 'string') jsonTag = j.event.toLowerCase();
+        } catch {
+          /* not JSON — ignore */
+        }
+        if (
+          sseTag === 'final' ||
+          sseTag === 'done' ||
+          sseTag === 'error' ||
+          jsonTag === 'run.completed' ||
+          jsonTag === 'run.failed' ||
+          jsonTag === 'final' ||
+          jsonTag === 'error'
+        ) {
           return;
         }
       }
@@ -171,10 +192,14 @@ function parseSseEvent(raw: string): SseEvent | null {
 }
 
 function* mapEvent(evt: SseEvent): Generator<RunEvent> {
-  // hermes-agent uses both `event:` typed events and untagged JSON-only `data:`
-  // chunks (the latter mirroring the OpenAI chat-completions stream shape).
-  // Cover both.
-  const tag = evt.event ?? '';
+  // hermes-agent's actual wire shape (verified against /v1/runs/{id}/events):
+  //   data: {"event": "message.delta", "delta": "..."}
+  //   data: {"event": "reasoning.available", "text": "..."}
+  //   data: {"event": "run.completed", "output": "...", "usage": {...}}
+  //   data: {"event": "run.failed", "error": {...}}
+  //   data: {"event": "tool.called", "tool": "...", ...}
+  // The `event` discriminator is INSIDE the JSON, not on the SSE `event:` tag.
+  // Some servers also send untagged OpenAI-style chunks; we handle that too.
   if (evt.data === '[DONE]') return;
 
   let json: Record<string, unknown> | null = null;
@@ -184,17 +209,38 @@ function* mapEvent(evt: SseEvent): Generator<RunEvent> {
     return;
   }
 
-  switch (tag) {
-    case 'token':
-      if (typeof json.delta === 'string' && json.delta.length > 0) {
+  // Prefer the JSON-embedded `event` (hermes); fall back to SSE tag.
+  const eventName = (typeof json.event === 'string' ? json.event : evt.event ?? '').toLowerCase();
+
+  switch (eventName) {
+    case 'message.delta':
+    case 'token': {
+      const delta = typeof json.delta === 'string' ? json.delta : '';
+      if (delta) {
         yield {
           type: 'token',
-          delta: json.delta,
+          delta,
           ...(typeof json.is_reasoning === 'boolean' ? { isReasoning: json.is_reasoning } : {}),
         };
       }
       return;
-    case 'tool_call':
+    }
+    case 'reasoning.delta':
+    case 'reasoning': {
+      const delta = typeof json.delta === 'string' ? json.delta : '';
+      if (delta) yield { type: 'token', delta, isReasoning: true };
+      return;
+    }
+    case 'reasoning.available': {
+      // hermes posts the full reasoning text once it's available. We surface
+      // it as a single non-streamed token so the captions store sees it,
+      // marked reasoning so the avatar doesn't speak it.
+      const text = typeof json.text === 'string' ? json.text : '';
+      if (text) yield { type: 'token', delta: text, isReasoning: true };
+      return;
+    }
+    case 'tool.called':
+    case 'tool_call': {
       yield {
         type: 'tool_call',
         tool: typeof json.tool === 'string' ? json.tool : 'tool',
@@ -204,23 +250,47 @@ function* mapEvent(evt: SseEvent): Generator<RunEvent> {
           : 'started',
       };
       return;
-    case 'final':
+    }
+    case 'run.completed':
+    case 'final': {
+      // hermes uses `output` for the full text; keep `text` as a fallback.
+      const text =
+        typeof json.output === 'string'
+          ? json.output
+          : typeof json.text === 'string'
+            ? json.text
+            : '';
       yield {
         type: 'final',
-        text: typeof json.text === 'string' ? json.text : '',
-        finishReason: mapFinishReason(json.finish_reason),
+        text,
+        finishReason: mapFinishReason(json.finish_reason ?? 'stop'),
       };
       return;
-    case 'error':
+    }
+    case 'run.failed':
+    case 'error': {
+      const errObj = (json.error ?? {}) as Record<string, unknown>;
       yield {
         type: 'error',
-        code: typeof json.code === 'string' ? json.code : 'unknown',
-        message: typeof json.message === 'string' ? json.message : 'unknown error',
+        code:
+          typeof json.code === 'string'
+            ? json.code
+            : typeof errObj.code === 'string'
+              ? errObj.code
+              : 'unknown',
+        message:
+          typeof json.message === 'string'
+            ? json.message
+            : typeof errObj.message === 'string'
+              ? errObj.message
+              : 'unknown error',
       };
       return;
+    }
   }
 
-  // Untagged (chat-completions-shaped) chunk:
+  // Untagged (chat-completions-shaped) chunk — kept for OpenAI-compatible
+  // /v1/runs implementations. hermes itself doesn't emit these.
   const choices = (json as OpenAIChatChunk).choices;
   if (Array.isArray(choices) && choices.length > 0) {
     const c = choices[0]!;

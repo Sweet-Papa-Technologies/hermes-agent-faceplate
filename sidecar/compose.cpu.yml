@@ -6,6 +6,10 @@ name: faceplate-sidecar
 
 services:
   sidecar:
+    # Builds native on every architecture (arm64 on Apple Silicon, x86_64
+    # elsewhere). openwakeword's stale tflite-runtime hard-dep is
+    # sidestepped by an explicit `pip install --no-deps openwakeword` in
+    # the Dockerfile — at runtime we use inference_framework="onnx".
     build:
       context: .
       dockerfile: Dockerfile.cpu
