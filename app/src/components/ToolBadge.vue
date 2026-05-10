@@ -95,10 +95,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tool-badge {
-  position: absolute;
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Flows inline in the OverlayPage's vertical stack — sits between the
+   * avatar and the captions. Centered horizontally inside its strip. */
+  align-self: center;
+  margin: 6px 0;
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
@@ -150,7 +150,7 @@ onBeforeUnmount(() => {
 .tool-badge-fade-enter-from,
 .tool-badge-fade-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(4px);
+  transform: translateY(4px);
 }
 
 @keyframes tool-badge-spin {

@@ -67,6 +67,13 @@ onBeforeUnmount(() => {
   width: 100vw;
   height: 100vh;
   background: var(--faceplate-bg, transparent);
+  /* Vertical stack: avatar pinned to top via its own flex alignment, then
+   * tool badge, then captions. Each below-avatar child collapses to zero
+   * via v-if when not active so the layout doesn't reserve dead space. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 :root[data-mode='windowed'] .overlay-page {

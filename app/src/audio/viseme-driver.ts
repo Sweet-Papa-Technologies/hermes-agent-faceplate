@@ -102,6 +102,7 @@ export function startVisemeDriver(
         payload: {
           amp,
           bands: [lo, midLow, mid, hi],
+          waveform: downsampleTimeDomain(time, 32),
         },
       });
     }
@@ -120,6 +121,27 @@ export function startVisemeDriver(
 }
 
 // ----------------------------------------------------------------- helpers
+
+function downsampleTimeDomain(buf: Uint8Array, target: number): number[] {
+  // Time-domain bytes from getByteTimeDomainData() are 0..255 with the
+  // silence midpoint at 128. Convert to signed [-1, 1] and average each
+  // bucket. `target` is small (typically 32) so the event payload stays
+  // cheap to relay across the in-process bus.
+  const out: number[] = [];
+  const stride = buf.length / target;
+  for (let i = 0; i < target; i++) {
+    const start = Math.floor(i * stride);
+    const end = Math.floor((i + 1) * stride);
+    let sum = 0;
+    let count = 0;
+    for (let j = start; j < end; j++) {
+      sum += ((buf[j] ?? 128) - 128) / 128;
+      count += 1;
+    }
+    out.push(count > 0 ? sum / count : 0);
+  }
+  return out;
+}
 
 function rms(buf: Uint8Array): number {
   let sum = 0;

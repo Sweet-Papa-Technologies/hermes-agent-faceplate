@@ -89,6 +89,14 @@ export interface UserWake {
 export interface TtsAudioEnvelope {
   amp: number;
   bands: [number, number, number, number];
+  /**
+   * Optional downsampled time-domain samples in the range [-1, 1].
+   * Provided by viseme-driver at the same ~30 Hz cadence as `amp`.
+   * Length is small (typically 32) so the event stays cheap to relay
+   * across the in-process bus. Unused by the default avatars; the Robo
+   * theme paints these as a live waveform inside the mouth bezel.
+   */
+  waveform?: number[];
 }
 
 // Addendum #1: TTS streams MP3/Opus over MSE; mime + format are first-class.

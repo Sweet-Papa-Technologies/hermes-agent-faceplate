@@ -20,6 +20,7 @@
     "@quasar/extras": "^1.16.4",
     "dompurify": "^3.2.4",
     "dotenv": "^16.4.7",
+    "marked": "^14.1.4",
     "openai": "^4.77.0",
     "pinia": "^3.0.1",
     "quasar": "^2.16.0",

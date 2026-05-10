@@ -20,7 +20,11 @@ import { getSettings, applyPatch } from './settings-store';
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
 const OVERLAY_W = 320;
-const OVERLAY_H = 320;
+// Window is taller than the avatar so captions, the tool-call badge, and
+// any other below-avatar UI render BELOW the face plate instead of over
+// it. The avatar SVG itself stays max 320x320 and is pinned to the top
+// of the window via `.avatar-root` flex alignment.
+const OVERLAY_H = 520;
 
 let avatarWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;

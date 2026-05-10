@@ -6,6 +6,7 @@
   >
     <svg
       v-if="manifest"
+      ref="svgEl"
       class="avatar-svg"
       :viewBox="`0 0 ${manifest.canvas.width} ${manifest.canvas.height}`"
       preserveAspectRatio="xMidYMid meet"
@@ -14,6 +15,10 @@
       <StateRing />
       <g class="avatar-head" v-html="headSvg" />
       <VisemeMouth />
+      <!-- Theme-specific FX layer. The Robo theme uses this to overlay
+           animated state-tinted eye glow + a live audio waveform inside
+           the mouth bezel. Other themes have no overlay. -->
+      <RoboFx v-if="manifest?.id === 'robo'" />
       <!--
         Hardcoded mic-active LED — not theme-overridable per design §12.1.
         Visible whenever the renderer holds a live MediaStream from the mic.
@@ -34,6 +39,7 @@ import { computed, onMounted, onBeforeUnmount, ref, watch, watchEffect } from 'v
 
 import StateRing from './StateRing.vue';
 import VisemeMouth from './VisemeMouth.vue';
+import RoboFx from './RoboFx.vue';
 import { useThemeStore } from '../stores/theme';
 import { useSettingsStore } from '../stores/settings';
 import { useAgentStore } from '../stores/agent';
@@ -48,26 +54,56 @@ const micActive = computed(() => agent.micActive);
 const scale = computed(() => settings.settings.avatar.scale);
 
 const rootEl = ref<HTMLDivElement | null>(null);
+const svgEl = ref<SVGSVGElement | null>(null);
 
 // Per-pixel hit testing for transparent overlay click-through.
 //
 // Approach: in overlay mode we tell main `setIgnoreMouseEvents(true,
 // {forward:true})` once at mount, then on every mousemove we report whether
-// the cursor is inside the avatar's circular bounds. Main flips
-// click-through accordingly. This is the polling pattern the design doc
-// references (electron/electron#1335).
+// the cursor is inside the avatar's bounds. Main flips click-through
+// accordingly. The hit region tracks the **SVG element**, not the root
+// div — the window is taller than the avatar so captions can sit below,
+// and clicks in the empty space below the face plate should pass through
+// to whatever is behind the overlay.
 let detachMouse: (() => void) | null = null;
 
 function isInsideAvatar(clientX: number, clientY: number): boolean {
-  const el = rootEl.value;
-  if (!el) return false;
-  const rect = el.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  const r = Math.min(rect.width, rect.height) / 2;
-  const dx = clientX - cx;
-  const dy = clientY - cy;
-  return dx * dx + dy * dy <= r * r;
+  // Two interactive regions in this overlay window:
+  //   1. The avatar SVG (circular bounds — the face plate).
+  //   2. Any element marked `data-faceplate-hit-region` (the captions
+  //      panel). These need pointer events so the user can scroll long
+  //      replies; without including them here, click-through stays ON
+  //      over the captions and the scroll wheel passes through to the
+  //      desktop instead of scrolling the panel.
+  const svg = svgEl.value;
+  if (svg) {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const r = Math.min(rect.width, rect.height) / 2;
+      const dx = clientX - cx;
+      const dy = clientY - cy;
+      if (dx * dx + dy * dy <= r * r) return true;
+    }
+  }
+  // Hit-region opt-ins (e.g. captions panel) live as siblings of the
+  // avatar in the OverlayPage, not as descendants of avatar-root, so we
+  // query the whole document. Single window — the marker is unambiguous.
+  const regions = document.querySelectorAll<HTMLElement>('[data-faceplate-hit-region]');
+  for (const el of regions) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    if (
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 watchEffect(() => {
@@ -156,10 +192,15 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .avatar-root {
+  /* Sized by the SVG it contains, NOT the full window. The overlay page
+   * uses a vertical flex stack: avatar shrinks to its content so the
+   * tool-badge + captions flow below without reserving dead space. */
   width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   background: var(--faceplate-bg, transparent);
   filter: var(--faceplate-card, none);
 }
