@@ -13,6 +13,43 @@
       </svg>
     </button>
 
+    <!-- Center action group: STOP + MUTE. Lives in the top middle of
+         the avatar so it's reachable mid-response without hunting. STOP
+         is shown whenever the agent is doing anything (thinking OR
+         speaking) and aborts both the in-flight Hermes run AND any TTS.
+         MUTE is a persistent toggle the user can flip anytime; the icon
+         flips between speaker / muted-speaker. -->
+    <div class="hud-center">
+      <transition name="hud-action-fade">
+        <button
+          v-if="canStop"
+          class="hud-btn hud-action hud-stop"
+          title="Stop response"
+          @click.stop="stop"
+        >
+          <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+            <rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor" />
+          </svg>
+        </button>
+      </transition>
+      <button
+        class="hud-btn hud-action hud-mute"
+        :class="{ 'is-muted': muted }"
+        :title="muted ? 'Unmute (TTS muted)' : 'Mute TTS'"
+        @click.stop="toggleMute"
+      >
+        <svg v-if="!muted" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <path d="M3 6 L3 10 L6 10 L9 13 L9 3 L6 6 Z" fill="currentColor" />
+          <path d="M11 5 Q13 8 11 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          <path d="M12.5 3.5 Q15.5 8 12.5 12.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.7" />
+        </svg>
+        <svg v-else viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <path d="M3 6 L3 10 L6 10 L9 13 L9 3 L6 6 Z" fill="currentColor" />
+          <path d="M11 5 L15 11 M15 5 L11 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
     <button class="hud-btn hud-close" title="Hide overlay" @click.stop="hide">
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
         <path
@@ -68,13 +105,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { storeToRefs } from 'pinia';
 
 import { useConversationsStore } from '../stores/conversations';
+import { useAgentStore } from '../stores/agent';
+import { interrupt as interruptTurn } from '../hermes/turn-handler';
 
 const convs = useConversationsStore();
+const agent = useAgentStore();
+const { state: agentState, muted } = storeToRefs(agent);
+
 const menuOpen = ref(false);
 const menuEl = ref<HTMLDivElement | null>(null);
+
+// STOP is offered whenever there's something to stop — agent is mid-turn
+// (thinking) or actively speaking. Hidden in idle / listening so the HUD
+// stays unobtrusive when nothing's happening.
+const canStop = computed(() =>
+  agentState.value === 'thinking' || agentState.value === 'speaking',
+);
+
+function stop(): void {
+  // turn-handler.interrupt() aborts the in-flight Hermes stream + any
+  // TTS, finalizes the partial assistant turn, and transitions the
+  // agent back to idle. UI state resets via the agent store updates.
+  interruptTurn('user.stop');
+}
+
+function toggleMute(): void {
+  agent.toggleMuted();
+}
 
 function toggleMenu(): void {
   menuOpen.value = !menuOpen.value;
@@ -153,7 +214,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* Position absolute over the avatar bounding box. The HUD belongs to the
- * `.avatar-root` slot (which is now `position: relative` for this anchor). */
+ * `.avatar-root` slot (which is `position: relative` for this anchor). */
 .hud {
   position: absolute;
   top: 6px;
@@ -168,6 +229,13 @@ onBeforeUnmount(() => {
   transition: opacity 180ms ease;
 }
 
+/* Center action group sits between the menu (left) and close (right). */
+.hud-center {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 /* Show on hover anywhere in the avatar slot. The parent .avatar-root
  * matches; we use a synthetic :has() so the HUD is independent of
  * mouse position over the buttons themselves. Falls back to .hud:hover
@@ -175,6 +243,14 @@ onBeforeUnmount(() => {
 .avatar-root:hover .hud,
 .hud:hover,
 .hud:focus-within {
+  opacity: 1;
+}
+
+/* The center action buttons stay visible whenever there's something to
+ * act on (agent active OR muted toggle on), so the user can stop a
+ * runaway response without first hovering the avatar. */
+.avatar-root:has(.hud-stop) .hud,
+.avatar-root:has(.hud-mute.is-muted) .hud {
   opacity: 1;
 }
 
@@ -204,6 +280,47 @@ onBeforeUnmount(() => {
   background: rgba(239, 68, 68, 0.85);
   color: #fff;
   border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Action buttons (stop, mute) — slightly more saturated background so
+ * they read as "primary controls" against the more muted menu / close. */
+.hud-action {
+  background: rgba(28, 30, 36, 0.92);
+}
+.hud-stop {
+  color: #ff9c9c;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.hud-stop:hover {
+  background: rgba(239, 68, 68, 0.9);
+  color: #fff;
+  border-color: rgba(239, 68, 68, 0.7);
+}
+.hud-mute {
+  color: rgba(255, 255, 255, 0.85);
+}
+.hud-mute:hover {
+  background: rgba(127, 220, 255, 0.18);
+  color: #fff;
+  border-color: rgba(127, 220, 255, 0.45);
+}
+.hud-mute.is-muted {
+  color: #ffd9a0;
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.18);
+}
+.hud-mute.is-muted:hover {
+  background: rgba(245, 158, 11, 0.28);
+}
+
+.hud-action-fade-enter-active,
+.hud-action-fade-leave-active {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.hud-action-fade-enter-from,
+.hud-action-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.85);
 }
 
 /* ─── menu popup ─── */

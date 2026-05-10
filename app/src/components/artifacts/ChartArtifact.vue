@@ -13,8 +13,54 @@ import { parseLooseJson } from './extract-json';
 
 interface ChartLikeConfig {
   type?: string;
-  data?: unknown;
-  options?: unknown;
+  data?: { labels?: unknown; datasets?: unknown[] } | unknown;
+  options?: { scales?: unknown } | unknown;
+  // Common malformations we move into the right place:
+  datasets?: unknown[];        // belongs under data.datasets
+  labels?: unknown;            // belongs under data.labels
+  scales?: unknown;            // belongs under options.scales
+}
+
+/**
+ * Models reliably emit the right Chart.js *fields* but not always the
+ * right *nesting*. The most common failure mode is a flat config:
+ *
+ *   { type, data:{labels:…}, options:{…}, datasets:[…], scales:{…} }
+ *
+ * which Chart.js reads as "no datasets, no axes config" and renders blank.
+ * Move stray top-level keys to where Chart.js expects them so a
+ * structurally-loose response still produces a real chart.
+ */
+function coerceChartShape(raw: ChartLikeConfig): ChartLikeConfig {
+  const cfg = { ...raw } as ChartLikeConfig;
+  // Ensure data exists as an object
+  let data: { labels?: unknown; datasets?: unknown[] } =
+    (typeof cfg.data === 'object' && cfg.data !== null && !Array.isArray(cfg.data))
+      ? { ...(cfg.data as Record<string, unknown>) }
+      : {};
+  // Hoist top-level datasets / labels into data
+  if (Array.isArray(cfg.datasets) && !Array.isArray(data.datasets)) {
+    data.datasets = cfg.datasets;
+  }
+  if (cfg.labels !== undefined && data.labels === undefined) {
+    data.labels = cfg.labels;
+  }
+  cfg.data = data;
+  delete cfg.datasets;
+  delete cfg.labels;
+
+  // Ensure options exists as an object, hoist top-level scales into options
+  let options: { scales?: unknown } =
+    (typeof cfg.options === 'object' && cfg.options !== null && !Array.isArray(cfg.options))
+      ? { ...(cfg.options as Record<string, unknown>) }
+      : {};
+  if (cfg.scales !== undefined && options.scales === undefined) {
+    options.scales = cfg.scales;
+  }
+  cfg.options = options;
+  delete cfg.scales;
+
+  return cfg;
 }
 
 const props = defineProps<{ artifact: Artifact }>();
@@ -29,15 +75,12 @@ async function render(): Promise<void> {
 
   let cfg: ChartLikeConfig;
   try {
-    // Tolerant parse — strips ```json fences, ignores trailing prose / a
-    // stray "// comment" after the closing brace, etc. Models occasionally
-    // wrap or pad the body; surface the actual chart instead of a parse
-    // error when the JSON itself is valid.
     cfg = parseLooseJson<ChartLikeConfig>(props.artifact.body);
   } catch (err) {
     error.value = `Invalid chart JSON: ${err instanceof Error ? err.message : String(err)}`;
     return;
   }
+  cfg = coerceChartShape(cfg);
   if (!cfg.type) {
     error.value = 'Chart config missing "type" field';
     return;

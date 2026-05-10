@@ -44,6 +44,13 @@ export const useAgentStore = defineStore('agent', () => {
    * (theme-immutable on purpose).
    */
   const micActive = ref<boolean>(false);
+  /**
+   * Transient TTS mute toggle. When true, speakAndAnimate skips the audio
+   * path entirely — the response still streams + lands in the conversation,
+   * but no sound plays. Persists across turns until the user toggles back.
+   * In-memory only; resets to false on app restart.
+   */
+  const muted = ref<boolean>(false);
 
   function setMicActive(active: boolean): void {
     micActive.value = active;
@@ -51,6 +58,11 @@ export const useAgentStore = defineStore('agent', () => {
 
   function setActivity(next: AgentActivity | null): void {
     activity.value = next;
+  }
+
+  function toggleMuted(): boolean {
+    muted.value = !muted.value;
+    return muted.value;
   }
 
   function transition(to: AgentState, reason?: string): boolean {
@@ -88,12 +100,14 @@ export const useAgentStore = defineStore('agent', () => {
     currentTurnId,
     activity,
     micActive,
+    muted,
     transition,
     setError,
     clearError,
     setTurn,
     setMicActive,
     setActivity,
+    toggleMuted,
     isIdle,
     isSpeaking,
     isListening,

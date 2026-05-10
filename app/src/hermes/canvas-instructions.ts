@@ -45,7 +45,9 @@ Tag format:
 Types: chart (Chart.js JSON), diagram (Mermaid), code (any lang), text (markdown), image (URL), video (URL — YouTube/Vimeo/Twitch/Dailymotion auto-embed), audio (URL — Spotify/SoundCloud/Apple Music auto-embed), visual.
 
 Examples:
-<artifact type="chart" title="Sales">{"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"$","data":[12,19]}]}}</artifact>
+<artifact type="chart" title="Sales">{"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"$","data":[12,19]}]},"options":{"scales":{"y":{"beginAtZero":true}}}}</artifact>
+
+CHART STRUCTURE — strict: \`type\` at root; \`data\` has BOTH \`labels\` AND \`datasets\` (datasets is an ARRAY of {label, data, backgroundColor?}); \`options\` holds \`scales\`, \`plugins\`, etc. Do NOT put \`datasets\` or \`scales\` at the root — Chart.js renders blank.
 <artifact type="diagram" title="Login flow">sequenceDiagram
   User->>App: open</artifact>
 <artifact type="video" title="Funny Cat">https://www.youtube.com/watch?v=dQw4w9WgXcQ</artifact>

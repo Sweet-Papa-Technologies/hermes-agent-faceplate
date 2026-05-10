@@ -253,12 +253,45 @@ async function runTurn(userText: string): Promise<void> {
 
   // Captions get the original (markdown intact); TTS gets a stripped
   // version so Piper doesn't read "asterisk asterisk bold asterisk asterisk".
-  await speakAndAnimate(handle, stripForSpeech(spokenText), settings);
+  // Wrap in try/catch — any unhandled rejection from TTS (sidecar down,
+  // network blip, MSE edge case) would otherwise propagate up to the
+  // event-bus handler that called us via `void runTurn(...)`, becoming
+  // an unhandled promise rejection. The assistant turn never finalizes
+  // and the conversation save never fires — turn vanishes from history.
+  try {
+    await speakAndAnimate(handle, stripForSpeech(spokenText), settings);
+  } catch (err) {
+    console.warn('[turn] speakAndAnimate threw — finalizing defensively:', err);
+  }
   // Re-arm the AudioContext for the next turn (suspended on barge-in).
   void resumeAudio();
 
+  // Defensive belt-and-suspenders save. speakAndAnimate normally calls
+  // finalizeTurn (which fires the syncer's $onAction → saveActive). If
+  // any path above bypassed that — early return when active != handle,
+  // an exception, an aborted handle — we still want the assistant turn
+  // and any tool_calls / artifact_ids on it to land on disk. finalizeTurn
+  // is a no-op when currentTurn is already null, so calling it twice is
+  // safe.
+  if (active === handle) {
+    convo.finalizeTurn();
+    active = null;
+  }
   agent.setActivity(null);
-  if (active === handle) active = null;
+
+  // Final belt: directly call saveActive at the very end, bypassing the
+  // syncer's $onAction path entirely. We've seen disk states with the
+  // user turn but no assistant — meaning $onAction for the assistant's
+  // finalize didn't fire (possibly hot-reload tearing down the listener,
+  // or a Pinia action-tracking edge case). This explicit save guarantees
+  // the assistant turn lands on disk.
+  const convs = useConversationsStore();
+  if (convs.activeId) {
+    void convs.saveActive(
+      convo.snapshotForPersist(),
+      convs.activeSessionId,
+    );
+  }
 }
 
 // ---------------------------------------------------------------- transports
@@ -515,9 +548,13 @@ async function speakAndAnimate(
   agent.transition('speaking', 'tts.start');
 
   const speech = settings.settings.speech;
-  if (speech.sidecar_mode === 'disabled') {
+  // Two ways to skip TTS: a permanent setting (`sidecar_mode: disabled`)
+  // and a transient toggle (`agent.muted`, controlled by the HUD's mute
+  // button). Both finalize the assistant turn immediately so it still
+  // lands in the conversation history without playing audio.
+  if (speech.sidecar_mode === 'disabled' || agent.muted) {
     convo.finalizeTurn();
-    agent.transition('idle', 'tts.disabled');
+    agent.transition('idle', agent.muted ? 'tts.muted' : 'tts.disabled');
     return;
   }
 
