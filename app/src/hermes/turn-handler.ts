@@ -19,6 +19,7 @@ import { useDiscoveryStore } from '../stores/discovery';
 import { streamChat, type ChatEndpoint, type ChatTurn } from './chat-client';
 import { startRun, type RunHandle, type RunsEndpoint } from './runs-client';
 import { paraphrase } from './paraphrase';
+import { stripForSpeech } from './strip-for-speech';
 import { speakStream, type SpeakHandle } from '../audio/tts-client';
 import { startVisemeDriver, type DriverHandle } from '../audio/viseme-driver';
 import { suspendAudio, resumeAudio } from '../audio/audio-context';
@@ -165,7 +166,9 @@ async function runTurn(userText: string): Promise<void> {
     },
   });
 
-  await speakAndAnimate(handle, spokenText, settings);
+  // Captions get the original (markdown intact); TTS gets a stripped
+  // version so Piper doesn't read "asterisk asterisk bold asterisk asterisk".
+  await speakAndAnimate(handle, stripForSpeech(spokenText), settings);
   // Re-arm the AudioContext for the next turn (suspended on barge-in).
   void resumeAudio();
 

@@ -97,7 +97,12 @@ export const InputSettings = z.object({
 
 export const HotkeysSettings = z.object({
   show_hide: HotkeyAccelerator.default('CommandOrControl+Shift+H'),
-  typing_bar: HotkeyAccelerator.default('CommandOrControl+Space'),
+  // Spotlight owns Cmd+Space on macOS, and Cmd+Option+Space is also
+  // taken by some macOS setups (Input Source switcher / Raycast / etc).
+  // `Control+Space` (literal Ctrl on every OS, not the
+  // CommandOrControl alias) is unbound by default on macOS, Win, and
+  // Linux DEs. Rebindable in Settings → Hotkeys.
+  typing_bar: HotkeyAccelerator.default('Control+Space'),
   push_to_talk: HotkeyAccelerator.default('CommandOrControl+Shift+Space'),
   captions: HotkeyAccelerator.default('CommandOrControl+Shift+C'),
   cycle_monitor: HotkeyAccelerator.default('CommandOrControl+Shift+M'),

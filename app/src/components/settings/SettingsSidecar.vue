@@ -75,6 +75,45 @@
       </q-card-actions>
     </q-card>
 
+    <h3>Voice catalog</h3>
+    <q-card flat bordered class="card">
+      <q-card-section class="muted">
+        Recommended Piper voices. The default (Amy) is bundled; the others
+        download to the sidecar volume on demand. Changing the active
+        voice above to one that isn't installed will silently fall back —
+        click <strong>Install</strong> first.
+      </q-card-section>
+      <q-list separator>
+        <q-item v-for="v in catalog" :key="v.id">
+          <q-item-section>
+            <q-item-label>{{ v.id }}</q-item-label>
+            <q-item-label caption>{{ v.language }} · {{ v.speaker }} · {{ v.quality }} · ~{{ v.size_mb }} MB</q-item-label>
+          </q-item-section>
+          <q-item-section side>
+            <q-chip v-if="v.installed" dense color="positive" text-color="white" icon="check">installed</q-chip>
+            <q-btn
+              v-else
+              outline
+              dense
+              no-caps
+              icon="download"
+              :label="downloading.has(v.id) ? 'Downloading…' : 'Install'"
+              :loading="downloading.has(v.id)"
+              @click="downloadVoice(v.id)"
+            />
+          </q-item-section>
+        </q-item>
+        <q-item v-if="catalog.length === 0">
+          <q-item-section>
+            <q-item-label caption>Sidecar didn't return a catalog — make sure the bundled image is up to date (`make restart`).</q-item-label>
+          </q-item-section>
+          <q-item-section side>
+            <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="refreshCatalog" />
+          </q-item-section>
+        </q-item>
+      </q-list>
+    </q-card>
+
     <h3>Speech-to-text</h3>
     <q-card flat bordered class="card">
       <q-card-section class="row q-col-gutter-md">
@@ -146,11 +185,21 @@ const lifecycleBusy = ref<'start' | 'stop' | 'restart' | null>(null);
 const $q = useQuasar();
 
 interface OptionRow { label: string; value: string }
+interface CatalogVoice {
+  id: string;
+  language: string;
+  speaker: string;
+  quality: string;
+  size_mb: number;
+  installed: boolean;
+}
 
 const ttsModelsRaw = ref<OptionRow[]>([]);
 const asrModelsRaw = ref<OptionRow[]>([]);
 const voicesRaw = ref<OptionRow[]>([]);
 const loadingDiscovery = ref(false);
+const catalog = ref<CatalogVoice[]>([]);
+const downloading = ref<Set<string>>(new Set());
 
 const ttsModelOptions = computed(() => mergeWithCurrent(ttsModelsRaw.value, ttsModel.value));
 const asrModelOptions = computed(() => mergeWithCurrent(asrModelsRaw.value, asrModel.value));
@@ -187,6 +236,58 @@ async function refreshDiscovery(): Promise<void> {
   }
 }
 
+async function refreshCatalog(): Promise<void> {
+  const baseUrl = `${url.value.replace(/\/+$/, '')}/v1`;
+  const headers: Record<string, string> = {};
+  if (token.value) headers.authorization = `Bearer ${token.value}`;
+  try {
+    const res = await fetch(`${baseUrl}/voices/catalog`, { headers });
+    if (!res.ok) {
+      catalog.value = [];
+      return;
+    }
+    const json = await res.json() as { data?: CatalogVoice[] };
+    catalog.value = json.data ?? [];
+  } catch (err) {
+    console.warn('[settings.sidecar] catalog fetch failed:', err);
+    catalog.value = [];
+  }
+}
+
+async function downloadVoice(id: string): Promise<void> {
+  const baseUrl = `${url.value.replace(/\/+$/, '')}/v1`;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (token.value) headers.authorization = `Bearer ${token.value}`;
+  // Pull a copy of the Set, mutate, reassign so Vue picks it up.
+  const next = new Set(downloading.value);
+  next.add(id);
+  downloading.value = next;
+  try {
+    const res = await fetch(`${baseUrl}/voices/download`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ voice: id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json?.detail ?? `HTTP ${res.status}`);
+    }
+    $q.notify({ type: 'positive', message: `Voice "${id}" installed`, timeout: 4000 });
+    await refreshCatalog();
+    await refreshDiscovery();
+  } catch (err) {
+    $q.notify({
+      type: 'negative',
+      message: `Voice download failed: ${err instanceof Error ? err.message : String(err)}`,
+      timeout: 8000,
+    });
+  } finally {
+    const cleared = new Set(downloading.value);
+    cleared.delete(id);
+    downloading.value = cleared;
+  }
+}
+
 async function refreshStatus(): Promise<void> {
   const fp = window.faceplate;
   if (!fp) return;
@@ -218,6 +319,7 @@ async function lifecycle(action: 'start' | 'stop' | 'restart'): Promise<void> {
 onMounted(() => {
   void refreshStatus();
   void refreshDiscovery();
+  void refreshCatalog();
 });
 
 const modeOptions = [

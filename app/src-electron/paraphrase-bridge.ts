@@ -34,6 +34,16 @@ import { getSettings } from './settings-store';
 import { readLlmEndpoint } from './hermes-discovery';
 
 const TIMEOUT_MS = 12_000;
+// Hard upper bound on input length passed to the small paraphrase model.
+// Gemma-4-E2B chokes on long multi-paragraph (e.g. tool-augmented research
+// answers) and frequently returns canned "please say something" garbage
+// instead of a real summary. Above this, we skip the paraphrase entirely
+// — the captions still show the full text, TTS just speaks the original.
+const PARAPHRASE_MAX_INPUT = 1_800;
+// Patterns the tiny model emits when it gives up. Treat any of these as a
+// failure signal and fall back to the original text.
+const CANNED_FAILURE_RE =
+  /\b(please\s+(say|provide|give|tell|share)|smiley\s+face|how\s+can\s+i\s+(assist|help)|i'?m\s+sorry,?\s*(but|i)|i\s+don'?t\s+understand)\b/i;
 // Default model id we send to litert-lm. The serve endpoint switches engines
 // per `model_id`, so this must match what `make litert-up` imported. Default
 // matches DESIGN-ADDENDUM-01 §4 (Gemma 4 E2B IT). Override
@@ -154,6 +164,15 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
   if (text.length <= cfg.trigger_chars) {
     return { text, used: 'skipped', latency_ms: 0 };
   }
+  if (text.length > PARAPHRASE_MAX_INPUT) {
+    // Long answers (tool-augmented research, multi-section replies) overflow
+    // the small paraphrase model's competence. Speak the original; captions
+    // already show the full text.
+    console.warn(
+      `[paraphrase] input ${text.length} chars > ${PARAPHRASE_MAX_INPUT} ceiling, speaking original`,
+    );
+    return { text, used: 'skipped', latency_ms: 0 };
+  }
 
   const messages: ChatBody['messages'] = [
     { role: 'system', content: cfg.system_prompt },
@@ -180,7 +199,7 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
       stream: false,
     });
     return {
-      text: result || text,
+      text: sanitizeParaphrase(result, text),
       used: 'reuse_hermes_llm',
       latency_ms: Date.now() - start,
     };
@@ -198,8 +217,9 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
       Math.max(48, cfg.target_words * 4),
       0.4,
     );
+    const sanitized = sanitizeParaphrase(result, text);
     return {
-      text: result || text,
+      text: sanitized,
       used: 'local_litert',
       latency_ms: Date.now() - start,
       ...(fallback_reason ? { fallback_reason } : {}),
@@ -227,6 +247,28 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
     console.error('[paraphrase] litert-lm failed:', err);
     return { text, used: 'skipped', latency_ms: Date.now() - start };
   }
+}
+
+/**
+ * Validate the LLM's paraphrase output. Tiny models (Gemma-4-E2B in
+ * particular) periodically misfire — they ignore the system prompt and
+ * answer the user message as if it were a chat turn ("Please tell me what
+ * you'd like me to summarize, smiley face"). When that happens we'd rather
+ * speak the original text than the canned reply. Returns the original on
+ * any failure signal.
+ */
+function sanitizeParaphrase(candidate: string, original: string): string {
+  const c = candidate.trim();
+  if (!c) return original;
+  // Way shorter than expected for a real summary AND looks like a refusal.
+  if (c.length < 12 && CANNED_FAILURE_RE.test(c)) return original;
+  // Anywhere in the output, common refusal patterns. We're stricter on
+  // these than on length because they're high-signal.
+  if (CANNED_FAILURE_RE.test(c)) {
+    console.warn(`[paraphrase] suspicious output (${c.length} chars), using original`);
+    return original;
+  }
+  return c;
 }
 
 class BypassUnsafeError extends Error {

@@ -17,8 +17,15 @@ import { interrupt as interruptTurn } from '../hermes/turn-handler';
 
 let session: AsrSession | null = null;
 let starting = false;
+let stopping = false;
 let attached = false;
 let detach: (() => void) | null = null;
+
+function log(...args: unknown[]): void {
+  // Verbose by design — PTT is hard to debug without seeing every state
+  // transition. The avatar's DevTools console is the right place to look.
+  console.log('[ptt]', ...args);
+}
 
 export function attachPttController(): void {
   if (attached) return;
@@ -42,16 +49,49 @@ export function detachPttController(): void {
 }
 
 export async function toggle(): Promise<void> {
+  log('toggle pressed', { session: !!session, starting, stopping, agentState: useAgentStore().state });
+  if (starting) {
+    log('ignoring — start in progress');
+    return;
+  }
+  if (stopping) {
+    log('ignoring — stop in progress');
+    return;
+  }
   return session ? stopAndSend() : start();
 }
 
+/** Public escape hatch — wired to the interrupt hotkey AND callable from the
+ * settings UI to recover from a wedged session. Tears down everything and
+ * resets the FSM to idle. */
+export function reset(): void {
+  log('reset called');
+  if (session) {
+    try {
+      session.cancel();
+    } catch (err) {
+      log('cancel during reset threw:', err);
+    }
+    session = null;
+  }
+  starting = false;
+  stopping = false;
+  const agent = useAgentStore();
+  if (agent.state === 'listening') agent.transition('idle', 'ptt.reset');
+  else if (agent.state === 'error') agent.clearError();
+}
+
 async function start(): Promise<void> {
-  if (starting || session) return;
+  if (starting || session) {
+    log('start: skipping (already starting or active)');
+    return;
+  }
   starting = true;
   const settings = useSettingsStore();
   const agent = useAgentStore();
   const endpoint = asrEndpointFromSettings(settings);
   if (!endpoint) {
+    log('start: no ASR endpoint (sidecar disabled?)');
     starting = false;
     return;
   }
@@ -62,14 +102,25 @@ async function start(): Promise<void> {
     interruptTurn('user.ptt');
   }
 
+  log('start: opening mic…');
   try {
     const next = await startAsrSession({ endpoint });
     session = next;
     agent.transition('listening', 'ptt');
+    log('start: recording');
     next.done.catch((err) => {
+      // Distinguish "user cancelled" from "real failure" — cancel rejects
+      // the done promise with "asr cancelled" but isn't an error condition
+      // the user should see.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'asr cancelled') {
+        log('session ended via cancel');
+        if (session === next) session = null;
+        return;
+      }
       if (session === next) session = null;
       console.error('[ptt] session failed:', err);
-      agent.setError('asr.failure', err instanceof Error ? err.message : String(err));
+      agent.setError('asr.failure', msg);
     });
   } catch (err) {
     console.error('[ptt] failed to open mic:', err);
@@ -80,12 +131,22 @@ async function start(): Promise<void> {
 }
 
 async function stopAndSend(): Promise<void> {
-  if (!session) return;
+  if (!session) {
+    log('stopAndSend: no active session');
+    return;
+  }
+  if (stopping) {
+    log('stopAndSend: already stopping, ignoring');
+    return;
+  }
+  stopping = true;
   const agent = useAgentStore();
   const s = session;
   session = null;
+  log('stopAndSend: stopping recorder, awaiting transcript…');
   try {
     const result = await s.stop();
+    log('stopAndSend: transcript received', { len: result.text.length, ms: result.duration_ms });
     if (!result.text) {
       // listening → idle is legal; if we somehow drifted into error, clear it.
       if (agent.state === 'error') agent.clearError();
@@ -104,14 +165,18 @@ async function stopAndSend(): Promise<void> {
   } catch (err) {
     console.error('[ptt] transcription failed:', err);
     agent.setError('asr.transcribe', err instanceof Error ? err.message : String(err));
+  } finally {
+    stopping = false;
   }
 }
 
 function cancel(): void {
   if (!session) return;
+  log('cancel called');
   const agent = useAgentStore();
   session.cancel();
   session = null;
+  stopping = false;
   if (agent.state === 'listening') agent.transition('idle', 'ptt.cancel');
 }
 
