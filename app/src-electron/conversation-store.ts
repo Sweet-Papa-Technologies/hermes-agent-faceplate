@@ -180,9 +180,12 @@ export function setActiveConversation(id: string): ConversationFile | null {
   if (!c) return null;
   const m = getManifest();
   m.active_id = id;
-  c.last_used_at = Date.now();
-  saveConversation(c);
-  syncManifestEntry(c);
+  // INTENTIONAL: do NOT touch `c.last_used_at` here. Switching to a
+  // conversation in the panel is a navigation, not a content change —
+  // bumping the timestamp on every click would re-sort the list and
+  // push older conversations toward the bottom for no reason. Only
+  // `saveActiveConversation` (a real content write) updates the
+  // timestamp + reorders the manifest.
   saveManifest(m);
   broadcast(IPC.conversations.activeChanged, { id, conversation: c });
   return c;

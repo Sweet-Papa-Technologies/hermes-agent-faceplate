@@ -213,7 +213,15 @@ async function runTurn(userText: string): Promise<void> {
   if (extracted.artifacts.length > 0) {
     assistantText = extracted.cleanedText;
     convo.setText(assistantText);
-    void persistAndAttachArtifacts(handle, extracted.artifacts);
+    // Must AWAIT — `attachArtifact()` only modifies the in-flight
+    // currentTurn. If we fired this and continued, speakAndAnimate would
+    // call finalizeTurn() (clearing currentTurn) BEFORE the artifact
+    // creates returned. The subsequent attachArtifact calls would no-op
+    // (early-return when currentTurn is null), the syncer's $onAction
+    // save fires WITHOUT artifact_ids on the turn, and the conversation
+    // panel ends up with the turn but no chips.
+    await persistAndAttachArtifacts(handle, extracted.artifacts);
+    if (active !== handle) return;
   }
 
   // Paraphrase pass — defer to main process which holds the LLM api key.
