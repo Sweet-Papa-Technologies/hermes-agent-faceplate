@@ -1,6 +1,7 @@
 <template>
   <div class="overlay-page" :class="`mode-${settings.mode}`">
     <Avatar />
+    <AgentActivity />
     <ToolBadge />
     <Captions />
   </div>
@@ -12,6 +13,7 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import Avatar from '../components/Avatar.vue';
 import Captions from '../components/Captions.vue';
 import ToolBadge from '../components/ToolBadge.vue';
+import AgentActivity from '../components/AgentActivity.vue';
 import { eventBus } from '../boot/event-bus';
 import { useSettingsStore } from '../stores/settings';
 import { useConversationStore } from '../stores/conversation';

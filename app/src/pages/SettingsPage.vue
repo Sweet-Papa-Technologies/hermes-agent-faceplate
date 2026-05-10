@@ -88,6 +88,12 @@ const tabs: TabDef[] = [
     load: () => import('../components/settings/SettingsParaphrase.vue'),
   },
   {
+    id: 'artifacts',
+    label: 'Canvas / Artifacts',
+    icon: 'auto_awesome',
+    load: () => import('../components/settings/SettingsArtifacts.vue'),
+  },
+  {
     id: 'privacy',
     label: 'Privacy',
     icon: 'privacy_tip',

@@ -24,6 +24,14 @@ export interface RunsEndpoint {
    * skill — see canvas-skill-installer.ts for the standalone skill body.
    */
   instructions?: string;
+  /**
+   * Prior conversation turns (user + assistant), in chronological order,
+   * EXCLUDING the current user message that's about to be sent as `input`.
+   * Hermes-agent reconstructs conversation memory from this — `session_id`
+   * alone is just an audit/approval handle, NOT a memory key. Without
+   * passing history, every turn is amnesic.
+   */
+  history?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
 }
 
 export type RunEvent =
@@ -69,6 +77,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunHandle> {
   const startBody: Record<string, unknown> = { input: opts.input };
   if (opts.endpoint.sessionId) startBody.session_id = opts.endpoint.sessionId;
   if (opts.endpoint.instructions) startBody.instructions = opts.endpoint.instructions;
+  if (opts.endpoint.history && opts.endpoint.history.length > 0) {
+    startBody.conversation_history = opts.endpoint.history;
+  }
 
   console.log('[runs-client] POST', url, 'auth=', headers.authorization ? `Bearer …${(headers.authorization as string).slice(-6)}` : '(none)');
 
@@ -246,6 +257,29 @@ function* mapEvent(evt: SseEvent): Generator<RunEvent> {
       // marked reasoning so the avatar doesn't speak it.
       const text = typeof json.text === 'string' ? json.text : '';
       if (text) yield { type: 'token', delta: text, isReasoning: true };
+      return;
+    }
+    case 'tool.started': {
+      // Hermes API gateway lifecycle — the tool is about to execute.
+      // `preview` carries a short hint (e.g. the skill name for skill_view,
+      // a compact arg summary for terminal/web tools).
+      yield {
+        type: 'tool_call',
+        tool: typeof json.tool === 'string' ? json.tool : 'tool',
+        argsPreview: typeof json.preview === 'string'
+          ? json.preview
+          : (typeof json.args_preview === 'string' ? json.args_preview : ''),
+        status: 'started',
+      };
+      return;
+    }
+    case 'tool.completed': {
+      yield {
+        type: 'tool_call',
+        tool: typeof json.tool === 'string' ? json.tool : 'tool',
+        argsPreview: typeof json.preview === 'string' ? json.preview : '',
+        status: json.error === true ? 'failed' : 'completed',
+      };
       return;
     }
     case 'tool.called':

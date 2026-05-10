@@ -16,10 +16,28 @@ const ALLOWED: Record<AgentState, AgentState[]> = {
   error: ['idle'],
 };
 
+/**
+ * What the agent is currently doing — surfaced to the user during long
+ * pauses so a Qwen3-style "1-minute reasoning, no visible tokens" silence
+ * doesn't look like a hang. Cleared as soon as the assistant starts
+ * emitting visible message text (captions take over from there).
+ */
+export interface AgentActivity {
+  /** Short human-readable label, e.g. "Thinking", "Loading skill", "Calling tool". */
+  label: string;
+  /** Optional secondary detail, e.g. tool name. */
+  detail?: string;
+  /** Material icon name; used for the activity badge. */
+  icon?: string;
+  /** Monotonic ts so we can do "stale > N ms → hide" if events stop flowing. */
+  ts: number;
+}
+
 export const useAgentStore = defineStore('agent', () => {
   const state = ref<AgentState>('idle');
   const lastError = ref<{ code: string; message: string } | null>(null);
   const currentTurnId = ref<string | null>(null);
+  const activity = ref<AgentActivity | null>(null);
   /**
    * True whenever the renderer holds a live MediaStream from the mic. Drives
    * the hardcoded green-LED indicator on the avatar halo per design §12.1
@@ -29,6 +47,10 @@ export const useAgentStore = defineStore('agent', () => {
 
   function setMicActive(active: boolean): void {
     micActive.value = active;
+  }
+
+  function setActivity(next: AgentActivity | null): void {
+    activity.value = next;
   }
 
   function transition(to: AgentState, reason?: string): boolean {
@@ -64,12 +86,14 @@ export const useAgentStore = defineStore('agent', () => {
     state,
     lastError,
     currentTurnId,
+    activity,
     micActive,
     transition,
     setError,
     clearError,
     setTurn,
     setMicActive,
+    setActivity,
     isIdle,
     isSpeaking,
     isListening,

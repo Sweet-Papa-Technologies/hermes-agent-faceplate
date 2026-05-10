@@ -22,7 +22,7 @@ import { startRun, type RunHandle, type RunsEndpoint } from './runs-client';
 import { paraphrase } from './paraphrase';
 import { stripForSpeech } from './strip-for-speech';
 import { extractArtifacts } from './extract-artifacts';
-import { CANVAS_PROTOCOL_INSTRUCTIONS } from './canvas-instructions';
+import { buildCanvasInstructions } from './canvas-instructions';
 import { speakStream, type SpeakHandle } from '../audio/tts-client';
 import { startVisemeDriver, type DriverHandle } from '../audio/viseme-driver';
 import { suspendAudio, resumeAudio } from '../audio/audio-context';
@@ -106,6 +106,7 @@ export function interrupt(reason: string): void {
   const agent = useAgentStore();
   const convo = useConversationStore();
   convo.finalizeTurn();
+  agent.setActivity(null);
   // From `error`, only clearError() is allowed by the FSM matrix.
   if (agent.state === 'error') agent.clearError();
   else if (agent.state !== 'idle') agent.transition('idle', reason);
@@ -133,6 +134,7 @@ async function runTurn(userText: string): Promise<void> {
   convo.finalizeTurn();
 
   agent.transition('thinking', 'turn.start');
+  agent.setActivity({ label: 'Thinking', icon: 'auto_awesome', ts: Date.now() });
   convo.startTurn('assistant');
 
   const abort = new AbortController();
@@ -220,6 +222,7 @@ async function runTurn(userText: string): Promise<void> {
   // Re-arm the AudioContext for the next turn (suspended on barge-in).
   void resumeAudio();
 
+  agent.setActivity(null);
   if (active === handle) active = null;
 }
 
@@ -241,6 +244,7 @@ async function consumeRuns(
   handle.run = run;
   if (run.sessionId) rememberSessionId(run.sessionId);
 
+  const agent = useAgentStore();
   const convo = useConversationStore();
   let buffered = '';
   let finalText = '';
@@ -259,6 +263,18 @@ async function consumeRuns(
         if (!evt.isReasoning) {
           buffered += evt.delta;
           convo.appendDelta(evt.delta);
+          // First visible token clears the "Thinking…" / "Reasoning…" badge
+          // — captions take over the user's attention from here.
+          if (agent.activity) agent.setActivity(null);
+        } else {
+          // Reasoning tokens flow during long Qwen3-style think loops. Keep
+          // the badge visible (and rate-limit updates) so the user sees
+          // *something* moving instead of dead air.
+          const last = agent.activity;
+          const now = Date.now();
+          if (!last || last.label !== 'Reasoning' || now - last.ts > 800) {
+            agent.setActivity({ label: 'Reasoning', icon: 'psychology', ts: now });
+          }
         }
         eventBus.emit({
           type: 'agent.token',
@@ -280,6 +296,17 @@ async function consumeRuns(
           status: evt.status,
           ts: Date.now(),
         });
+        // Surface as live activity so the user sees what's happening during
+        // long pauses. skill_view gets a friendlier label.
+        if (evt.status === 'started') {
+          const isSkill = evt.tool === 'skill_view';
+          agent.setActivity({
+            label: isSkill ? 'Loading skill' : `Calling ${evt.tool}`,
+            ...(evt.argsPreview ? { detail: evt.argsPreview } : {}),
+            icon: isSkill ? 'school' : 'build',
+            ts: Date.now(),
+          });
+        }
         eventBus.emit({
           type: 'agent.tool_call',
           ts: Date.now(),
@@ -416,9 +443,13 @@ async function speakAndAnimate(
 
 function buildMessages(userText: string): ChatTurn[] {
   // Prepend the artifact protocol as a system message so the OpenAI-compat
-  // chat path enforces the same output contract as /v1/runs.
+  // chat path enforces the same output contract as /v1/runs. Append
+  // conversation history so this path also has memory across turns.
+  const settings = useSettingsStore();
+  const history = buildHistoryFromConvo();
   return [
-    { role: 'system', content: CANVAS_PROTOCOL_INSTRUCTIONS },
+    { role: 'system', content: buildCanvasInstructions(settings.settings.artifacts.eagerness) },
+    ...history,
     { role: 'user', content: userText },
   ];
 }
@@ -466,19 +497,50 @@ function chatEndpointFromSettings(
   };
 }
 
+// How many prior turns to send back. Hermes server-side prompt caching
+// kicks in for the prefix, so cost grows roughly with the new tail. 40
+// turns is plenty for the kinds of conversations the Faceplate hosts.
+const MAX_HISTORY_TURNS = 40;
+
+type HistoryTurn = NonNullable<RunsEndpoint['history']>[number];
+
+function buildHistoryFromConvo(): HistoryTurn[] {
+  const convo = useConversationStore();
+  const out: HistoryTurn[] = [];
+  for (const t of convo.history) {
+    if (t.role !== 'user' && t.role !== 'assistant' && t.role !== 'system') continue;
+    if (!t.text || !t.text.trim()) continue;
+    out.push({ role: t.role, content: t.text });
+  }
+  // Drop the most recent user turn — turn-handler just finalized it before
+  // calling consumeRuns, but Hermes wants it as `input`, not as history.
+  if (out.length > 0 && out[out.length - 1]!.role === 'user') {
+    out.pop();
+  }
+  if (out.length > MAX_HISTORY_TURNS) {
+    return out.slice(-MAX_HISTORY_TURNS);
+  }
+  return out;
+}
+
 function runsEndpointFromSettings(
   settings: ReturnType<typeof useSettingsStore>,
 ): RunsEndpoint | null {
   const h = settings.settings.hermes;
   if (!h.base_url) return null;
   const sid = getActiveSessionId();
+  const history = buildHistoryFromConvo();
   return {
     baseUrl: h.base_url.replace(/\/$/, ''),
     ...(h.api_key ? { apiKey: h.api_key } : {}),
     ...(sid ? { sessionId: sid } : {}),
     // Always inject the artifact protocol as ephemeral_system_prompt.
-    // Stable string → server-side prompt caching keeps this cheap.
-    instructions: CANVAS_PROTOCOL_INSTRUCTIONS,
+    // Stable per-eagerness string → server-side prompt caching keeps this cheap.
+    instructions: buildCanvasInstructions(settings.settings.artifacts.eagerness),
+    // CRITICAL: Hermes session_id is an audit handle, NOT a memory key.
+    // Conversation memory comes from explicit history — without this every
+    // turn is amnesic regardless of session continuity.
+    ...(history.length > 0 ? { history } : {}),
   };
 }
 

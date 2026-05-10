@@ -146,6 +146,23 @@ export const PrivacySettings = z.object({
   mic_warning_shown: z.boolean().default(false),
 });
 
+/**
+ * How aggressively the assistant should reach for <artifact> tags.
+ *
+ *   subtle     — only when the user explicitly asks for a chart / diagram /
+ *                code. Most replies stay text-only.
+ *   balanced   — default. Use artifacts when they materially help (data,
+ *                runnable code, system flows). Skip for short answers.
+ *   liberal    — proactively render artifacts whenever feasible — turn lists
+ *                with comparable values into charts, system descriptions
+ *                into diagrams, code mentions into code blocks, etc.
+ *   aggressive — every reply that COULD have a visualization gets one,
+ *                even when the prose alone would suffice.
+ */
+export const ArtifactsSettings = z.object({
+  eagerness: z.enum(['subtle', 'balanced', 'liberal', 'aggressive']).default('balanced'),
+});
+
 export const LinuxSettings = z.object({
   // Only consulted when XDG_SESSION_TYPE === 'wayland'. Requires app restart
   // to take effect (sets ozone-platform=x11 before app.whenReady()).
@@ -168,6 +185,7 @@ export const FaceplateSettings = z.object({
   hotkeys: HotkeysSettings.default({}),
   avatar: AvatarSettings.default({}),
   privacy: PrivacySettings.default({}),
+  artifacts: ArtifactsSettings.default({}),
   linux: LinuxSettings.default({}),
   wizard: WizardState.default({}),
 });
@@ -180,6 +198,7 @@ export type AvatarSettings = z.infer<typeof AvatarSettings>;
 export type InputSettings = z.infer<typeof InputSettings>;
 export type HotkeysSettings = z.infer<typeof HotkeysSettings>;
 export type PrivacySettings = z.infer<typeof PrivacySettings>;
+export type ArtifactsSettings = z.infer<typeof ArtifactsSettings>;
 export type LinuxSettings = z.infer<typeof LinuxSettings>;
 
 export function defaultSettings(): FaceplateSettings {
