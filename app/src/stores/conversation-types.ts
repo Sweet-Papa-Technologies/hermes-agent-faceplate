@@ -48,6 +48,13 @@ export interface ConversationFile {
   title: string;
   created_at: number;
   last_used_at: number;
+  /** Audit / approval handle. Hermes uses this to group turns into one
+   * dashboard entry; not used for memory. */
   hermes_session_id: string | null;
+  /** OpenAI-Responses-style chain head. We send this as
+   * `previous_response_id` on the next turn so Hermes reconstructs
+   * conversation memory from its server-side response store — the
+   * proper alternative to replaying `conversation_history` ourselves. */
+  hermes_last_response_id?: string | null;
   turns: PersistedTurn[];
 }

@@ -139,8 +139,12 @@ const conversations: FaceplatePreload['conversations'] = {
     ipcRenderer.invoke(IPC.conversations.create, title),
   setActive: (id: string): Promise<ConversationFile | null> =>
     ipcRenderer.invoke(IPC.conversations.setActive, id),
-  saveActive: (turns: PersistedTurn[], sessionId: string | null) =>
-    ipcRenderer.invoke(IPC.conversations.saveActive, turns, sessionId),
+  saveActive: (
+    turns: PersistedTurn[],
+    sessionId: string | null,
+    lastResponseId?: string | null,
+  ) =>
+    ipcRenderer.invoke(IPC.conversations.saveActive, turns, sessionId, lastResponseId),
   updateTitle: (id: string, title: string) =>
     ipcRenderer.invoke(IPC.conversations.updateTitle, id, title),
   archive: (id: string) => ipcRenderer.invoke(IPC.conversations.archive, id),

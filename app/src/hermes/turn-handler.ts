@@ -19,6 +19,7 @@ import { useSettingsStore } from '../stores/settings';
 import { useDiscoveryStore } from '../stores/discovery';
 import { streamChat, type ChatEndpoint, type ChatTurn } from './chat-client';
 import { startRun, type RunHandle, type RunsEndpoint } from './runs-client';
+import { startResponse, type ResponseHandle, type ResponsesEndpoint } from './responses-client';
 import { paraphrase } from './paraphrase';
 import { stripForSpeech } from './strip-for-speech';
 import { extractArtifacts } from './extract-artifacts';
@@ -33,6 +34,7 @@ interface ActiveTurn {
   tts: SpeakHandle | null;
   driver: DriverHandle | null;
   run: RunHandle | null;
+  response: ResponseHandle | null;
 }
 
 let active: ActiveTurn | null = null;
@@ -56,6 +58,15 @@ function rememberSessionId(sid: string): void {
   // first server response and the assistant turn finalize would lose the
   // handle to hermes' server-side conversation memory.
   void convs.saveActive(convo.snapshotForPersist(), sid);
+}
+
+function rememberResponseId(rid: string): void {
+  const convs = useConversationsStore();
+  const convo = useConversationStore();
+  if (convs.activeLastResponseId === rid) return;
+  convs.setActiveLastResponseIdLocal(rid);
+  // Persist immediately so a mid-turn crash doesn't lose the chain head.
+  void convs.saveActive(convo.snapshotForPersist(), convs.activeSessionId, rid);
 }
 
 let turnCount = 0;
@@ -98,6 +109,8 @@ export function interrupt(reason: string): void {
   if (a.run) {
     void a.run.stop();
   }
+  // Responses path: aborting the AbortController cancels the SSE stream;
+  // server stops generating once the connection drops.
   a.abort.abort(reason);
   // Per design §4.6: barge-in suspends the AudioContext too. We resume on
   // the next play() (TTS client's autoplay flow re-resumes via getAudioContext).
@@ -138,13 +151,27 @@ async function runTurn(userText: string): Promise<void> {
   convo.startTurn('assistant');
 
   const abort = new AbortController();
-  const handle: ActiveTurn = { abort, tts: null, driver: null, run: null };
+  const handle: ActiveTurn = { abort, tts: null, driver: null, run: null, response: null };
   active = handle;
 
   let assistantText = '';
   try {
+    // Try /v1/responses first — it gives us server-managed conversation
+    // state via previous_response_id chaining (same flow the in-process
+    // TUI gets). Fall back to /v1/runs for older Hermes builds, or to
+    // /v1/chat/completions if even runs is unavailable.
     if (discovery.useRuns) {
-      assistantText = await consumeRuns(handle, userText, settings);
+      try {
+        assistantText = await consumeResponses(handle, userText, settings);
+      } catch (err) {
+        if (active !== handle || abort.signal.aborted) throw err;
+        const reason = err instanceof Error ? err.message : String(err);
+        // 404 (endpoint missing on older hermes) → fall through to runs.
+        // Anything else → re-throw.
+        if (!/HTTP 404/i.test(reason)) throw err;
+        console.warn('[turn] /v1/responses 404; falling back to /v1/runs');
+        assistantText = await consumeRuns(handle, userText, settings);
+      }
     } else {
       assistantText = await consumeChat(handle, userText, settings);
     }
@@ -227,6 +254,104 @@ async function runTurn(userText: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------- transports
+
+async function consumeResponses(
+  handle: ActiveTurn,
+  userText: string,
+  settings: ReturnType<typeof useSettingsStore>,
+): Promise<string> {
+  const endpoint = responsesEndpointFromSettings(settings);
+  if (!endpoint) throw new Error('responses endpoint not configured');
+
+  const response = await startResponse({
+    endpoint,
+    input: userText,
+    signal: handle.abort.signal,
+  });
+  handle.response = response;
+
+  const agent = useAgentStore();
+  const convo = useConversationStore();
+  let buffered = '';
+  let finalText = '';
+  let started = false;
+  let capturedId = false;
+
+  for await (const evt of response.events) {
+    // Capture the response id on the first event after response.created.
+    // (responses-client stamps it onto the handle via a closure.)
+    if (!capturedId && response.responseId) {
+      rememberResponseId(response.responseId);
+      capturedId = true;
+    }
+    switch (evt.type) {
+      case 'started':
+        break;
+      case 'token':
+        if (!started) {
+          started = true;
+          eventBus.emit({ type: 'agent.thinking', ts: Date.now(), payload: {} });
+        }
+        if (!evt.isReasoning) {
+          buffered += evt.delta;
+          convo.appendDelta(evt.delta);
+          if (agent.activity) agent.setActivity(null);
+        } else {
+          const last = agent.activity;
+          const now = Date.now();
+          if (!last || last.label !== 'Reasoning' || now - last.ts > 800) {
+            agent.setActivity({ label: 'Reasoning', icon: 'psychology', ts: now });
+          }
+        }
+        eventBus.emit({
+          type: 'agent.token',
+          ts: Date.now(),
+          payload: {
+            delta: evt.delta,
+            index: 0,
+            ...(evt.isReasoning ? { is_reasoning: true } : {}),
+          },
+        });
+        break;
+      case 'tool_call':
+        convo.appendToolCall({
+          tool: evt.tool,
+          args_preview: evt.argsPreview,
+          status: evt.status,
+          ts: Date.now(),
+        });
+        if (evt.status === 'started') {
+          const isSkill = evt.tool === 'skill_view';
+          agent.setActivity({
+            label: isSkill ? 'Loading skill' : `Calling ${evt.tool}`,
+            ...(evt.argsPreview ? { detail: evt.argsPreview } : {}),
+            icon: isSkill ? 'school' : 'build',
+            ts: Date.now(),
+          });
+        }
+        eventBus.emit({
+          type: 'agent.tool_call',
+          ts: Date.now(),
+          payload: {
+            tool: evt.tool,
+            args_preview: evt.argsPreview,
+            status: evt.status,
+          },
+        });
+        break;
+      case 'final':
+        finalText = evt.text || buffered;
+        break;
+      case 'error':
+        throw new Error(`${evt.code}: ${evt.message}`);
+    }
+  }
+
+  // Last chance to capture id (some servers may emit response.created late).
+  if (!capturedId && response.responseId) rememberResponseId(response.responseId);
+
+  return finalText || buffered;
+}
 
 async function consumeRuns(
   handle: ActiveTurn,
@@ -547,6 +672,23 @@ function runsEndpointFromSettings(
     // Conversation memory comes from explicit history — without this every
     // turn is amnesic regardless of session continuity.
     ...(history.length > 0 ? { history } : {}),
+  };
+}
+
+function responsesEndpointFromSettings(
+  settings: ReturnType<typeof useSettingsStore>,
+): ResponsesEndpoint | null {
+  const h = settings.settings.hermes;
+  if (!h.base_url) return null;
+  const convs = useConversationsStore();
+  const prevId = convs.activeLastResponseId;
+  return {
+    baseUrl: h.base_url.replace(/\/$/, ''),
+    ...(h.api_key ? { apiKey: h.api_key } : {}),
+    instructions: buildCanvasInstructions(settings.settings.artifacts.eagerness),
+    // Stateful chain: server reconstructs full conversation from its
+    // response_store. We don't replay history.
+    ...(prevId ? { previousResponseId: prevId } : {}),
   };
 }
 

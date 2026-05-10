@@ -191,6 +191,7 @@ export function setActiveConversation(id: string): ConversationFile | null {
 export function saveActiveConversation(
   turns: PersistedTurn[],
   sessionId: string | null,
+  lastResponseId?: string | null,
 ): ConversationFile | null {
   const m = getManifest();
   if (!m.active_id) return null;
@@ -199,6 +200,11 @@ export function saveActiveConversation(
   c.turns = turns;
   c.last_used_at = Date.now();
   c.hermes_session_id = sessionId;
+  // Only update lastResponseId when the caller explicitly passed it (undefined
+  // = leave as-is). null = clear (e.g. "new conversation"). string = set.
+  if (lastResponseId !== undefined) {
+    c.hermes_last_response_id = lastResponseId;
+  }
   saveConversation(c);
   syncManifestEntry(c);
   broadcast(IPC.conversations.changed, { id: c.id, conversation: c });
@@ -324,8 +330,8 @@ export function registerConversationsIpc(): void {
   ipcMain.handle(IPC.conversations.setActive, (_e, id: string) => setActiveConversation(id));
   ipcMain.handle(
     IPC.conversations.saveActive,
-    (_e, turns: PersistedTurn[], sessionId: string | null) =>
-      saveActiveConversation(turns, sessionId),
+    (_e, turns: PersistedTurn[], sessionId: string | null, lastResponseId?: string | null) =>
+      saveActiveConversation(turns, sessionId, lastResponseId),
   );
   ipcMain.handle(
     IPC.conversations.updateTitle,

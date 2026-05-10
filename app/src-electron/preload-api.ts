@@ -228,7 +228,11 @@ export interface FaceplatePreload {
     getActive(): Promise<ConversationFile | null>;
     create(title?: string): Promise<ConversationFile>;
     setActive(id: string): Promise<ConversationFile | null>;
-    saveActive(turns: PersistedTurn[], sessionId: string | null): Promise<ConversationFile | null>;
+    saveActive(
+      turns: PersistedTurn[],
+      sessionId: string | null,
+      lastResponseId?: string | null,
+    ): Promise<ConversationFile | null>;
     updateTitle(id: string, title: string): Promise<ConversationFile | null>;
     archive(id: string): Promise<void>;
     delete(id: string): Promise<void>;

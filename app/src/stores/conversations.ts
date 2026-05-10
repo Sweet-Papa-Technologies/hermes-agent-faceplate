@@ -25,12 +25,21 @@ export const useConversationsStore = defineStore('conversations', () => {
 
   const activeId = computed<string | null>(() => active.value?.id ?? null);
   const activeSessionId = computed<string | null>(() => active.value?.hermes_session_id ?? null);
+  const activeLastResponseId = computed<string | null>(() =>
+    active.value?.hermes_last_response_id ?? null,
+  );
   const visibleList = computed(() => searchResults.value ?? list.value);
 
   function setActiveSessionIdLocal(sid: string | null): void {
     if (!active.value) return;
     if (active.value.hermes_session_id === sid) return;
     active.value = { ...active.value, hermes_session_id: sid };
+  }
+
+  function setActiveLastResponseIdLocal(id: string | null): void {
+    if (!active.value) return;
+    if (active.value.hermes_last_response_id === id) return;
+    active.value = { ...active.value, hermes_last_response_id: id };
   }
 
   /** Apply a broadcast from main (came from another window's switch). */
@@ -140,14 +149,17 @@ export const useConversationsStore = defineStore('conversations', () => {
   }
 
   /** Push the latest turns + session id to disk. Called by the syncer on
-   * every finalize; safe to call frequently — main writes atomically. */
+   * every finalize; safe to call frequently — main writes atomically.
+   * `lastResponseId` is sticky: pass undefined to leave as-is, null to clear,
+   * a string to set. */
   async function saveActive(
     turns: import('./conversation-types').PersistedTurn[],
     sessionId: string | null,
+    lastResponseId?: string | null,
   ): Promise<void> {
     const fp = window.faceplate;
     if (!fp) return;
-    const updated = await fp.conversations.saveActive(turns, sessionId);
+    const updated = await fp.conversations.saveActive(turns, sessionId, lastResponseId);
     if (updated) active.value = updated;
   }
 
@@ -173,6 +185,8 @@ export const useConversationsStore = defineStore('conversations', () => {
     refreshList,
     refreshActive,
     setActiveSessionIdLocal,
+    setActiveLastResponseIdLocal,
+    activeLastResponseId,
     applyActiveChanged,
     applyChanged,
   };
