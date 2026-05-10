@@ -64,19 +64,33 @@ const paraphraseModelInput = z.preprocess(
   ParaphraseModelEnum,
 );
 
+/**
+ * The literal previous default. When users have this exact string in their
+ * settings.yaml, the boot-time migration upgrades them to the new default
+ * (DEFAULT_PARAPHRASE_PROMPT). Customized prompts are left alone.
+ *
+ * Add older defaults to PARAPHRASE_PROMPT_LEGACY_DEFAULTS as we evolve so
+ * users from any prior version get migrated forward.
+ */
+export const PARAPHRASE_PROMPT_LEGACY_DEFAULTS: readonly string[] = [
+  'Rewrite the following assistant message as natural spoken English in <= 25 words. Preserve meaning, drop code blocks and URLs.',
+];
+
+export const DEFAULT_PARAPHRASE_PROMPT =
+  "Summarize this assistant reply as 1-2 conversational sentences (max 20 words) for text-to-speech. " +
+  "DO NOT enumerate long lists — if more than 5 items, mention the first 2-3 then say 'and several more' or 'etc.'. " +
+  "Drop code blocks, URLs, JSON, and parenthetical artifact references like '(chart: ...)'. " +
+  "Keep a natural conversational tone — the user is hearing this aloud, not reading it.";
+
 export const ParaphraseSettings = z.object({
   enabled: z.boolean().default(true),
   trigger_chars: z.number().int().nonnegative().default(280),
-  target_words: z.number().int().positive().default(25),
+  target_words: z.number().int().positive().default(20),
   model: paraphraseModelInput.default('local_litert'),
   /** Endpoint the local_litert mode posts to. Defaults to the litert-lm
    *  serve port set by scripts/start-litert.sh. */
   litert_lm_url: z.string().url().default('http://127.0.0.1:7860/v1'),
-  system_prompt: z
-    .string()
-    .default(
-      'Rewrite the following assistant message as natural spoken English in <= 25 words. Preserve meaning, drop code blocks and URLs.',
-    ),
+  system_prompt: z.string().default(DEFAULT_PARAPHRASE_PROMPT),
 });
 
 export const TtsSettings = z.object({

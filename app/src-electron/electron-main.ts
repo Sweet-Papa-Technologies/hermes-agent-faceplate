@@ -7,6 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { applyPatch, getSettings, registerSettingsIpc } from './settings-store';
+import {
+  DEFAULT_PARAPHRASE_PROMPT,
+  PARAPHRASE_PROMPT_LEGACY_DEFAULTS,
+} from '../src/stores/settings-schema';
 import { readApiServerKey } from './hermes-discovery';
 import {
   createAvatarWindow,
@@ -35,6 +39,19 @@ import {
 } from './conversation-store';
 import { registerArtifactsIpc } from './artifact-store';
 import { ensureCanvasSkillInstalled } from './canvas-skill-installer';
+
+// One-shot migration: if the user's paraphrase.system_prompt matches a
+// literal previous default, upgrade to the current default. This lets us
+// improve the TTS-summary instructions over time (shorter outputs, list
+// shortening, etc.) without overwriting prompts users have customized
+// themselves. Customized prompts → no match → no change.
+function migrateParaphrasePrompt(): void {
+  const current = getSettings().paraphrase.system_prompt;
+  if (current === DEFAULT_PARAPHRASE_PROMPT) return;
+  if (!PARAPHRASE_PROMPT_LEGACY_DEFAULTS.includes(current)) return;
+  applyPatch({ paraphrase: { system_prompt: DEFAULT_PARAPHRASE_PROMPT } });
+  console.log('[main] migrated paraphrase.system_prompt to current default');
+}
 
 // One-shot: seed `hermes.api_key` from ~/.hermes/.env when empty. The wizard
 // asks the user to paste the key by hand; if they skipped that field but
@@ -208,6 +225,7 @@ void app.whenReady().then(() => {
   // don't get clobbered. Silent no-op if ~/.hermes doesn't exist yet.
   ensureCanvasSkillInstalled();
 
+  migrateParaphrasePrompt();
   seedHermesApiKeyFromLocalEnv();
   seedSidecarTokenFromMakefileCache();
   installCorsHeaderInjection();
