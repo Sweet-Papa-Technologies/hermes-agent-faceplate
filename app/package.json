@@ -18,9 +18,12 @@
   },
   "dependencies": {
     "@quasar/extras": "^1.16.4",
+    "chart.js": "^4.5.1",
     "dompurify": "^3.2.4",
     "dotenv": "^16.4.7",
+    "highlight.js": "^11.11.1",
     "marked": "^14.1.4",
+    "mermaid": "^11.14.0",
     "openai": "^4.77.0",
     "pinia": "^3.0.1",
     "quasar": "^2.16.0",

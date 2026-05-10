@@ -51,6 +51,8 @@ const captions = useSetting('hotkeys.captions');
 const cycleMon = useSetting('hotkeys.cycle_monitor');
 const replay = useSetting('hotkeys.replay');
 const interruptKey = useSetting('hotkeys.interrupt');
+const convoPanel = useSetting('hotkeys.conversation_panel');
+const canvasKey = useSetting('hotkeys.canvas');
 
 interface Row {
   path: string;
@@ -69,6 +71,8 @@ const rows = computed<Row[]>(() => [
   { path: 'cycle_monitor', label: 'Cycle monitor', caption: 'Move the avatar to the next display.', value: cycleMon.value, default: 'CommandOrControl+Shift+M', set: (v) => (cycleMon.value = v) },
   { path: 'replay', label: 'Replay last response', caption: 'Speak the last assistant message again.', value: replay.value, default: 'CommandOrControl+Shift+R', set: (v) => (replay.value = v) },
   { path: 'interrupt', label: 'Interrupt', caption: 'Cancel the current turn.', value: interruptKey.value, default: 'CommandOrControl+.', set: (v) => (interruptKey.value = v) },
+  { path: 'conversation_panel', label: 'Conversation panel', caption: 'Open the conversation history + transcript window.', value: convoPanel.value, default: 'CommandOrControl+Shift+J', set: (v) => (convoPanel.value = v) },
+  { path: 'canvas', label: 'Canvas', caption: 'Open the artifact canvas window.', value: canvasKey.value, default: 'CommandOrControl+Shift+K', set: (v) => (canvasKey.value = v) },
 ]);
 
 const isMac = computed(() => window.faceplate?.platform.os === 'darwin');

@@ -11,6 +11,16 @@ import type {
 } from '../src/stores/settings-schema';
 import type { AvatarThemeManifest } from '../src/themes/manifest-schema';
 import type { FaceplateEvent } from '../src/hermes/event-schema';
+import type {
+  ConversationFile,
+  ConversationManifestEntry,
+  PersistedTurn,
+} from '../src/stores/conversation-types';
+import type {
+  Artifact,
+  ArtifactIndexEntry,
+  CreateArtifactInput,
+} from '../src/stores/artifact-types';
 
 export type SidecarBuild = 'cpu' | 'cpu-slim' | 'cuda';
 
@@ -212,6 +222,47 @@ export interface FaceplatePreload {
     /** Subscribe (typing window) to focus-on-open events. */
     onOpened(cb: () => void): () => void;
   };
+  conversations: {
+    list(): Promise<ConversationManifestEntry[]>;
+    load(id: string): Promise<ConversationFile | null>;
+    getActive(): Promise<ConversationFile | null>;
+    create(title?: string): Promise<ConversationFile>;
+    setActive(id: string): Promise<ConversationFile | null>;
+    saveActive(turns: PersistedTurn[], sessionId: string | null): Promise<ConversationFile | null>;
+    updateTitle(id: string, title: string): Promise<ConversationFile | null>;
+    archive(id: string): Promise<void>;
+    delete(id: string): Promise<void>;
+    search(query: string): Promise<ConversationManifestEntry[]>;
+    exportMarkdown(id: string): Promise<string>;
+    /** Toggle the conversation panel window. Owned by main. */
+    togglePanel(): Promise<void>;
+    /** Subscribe to active-conversation changes (any window). */
+    onActiveChanged(
+      cb: (msg: { id: string | null; conversation: ConversationFile | null }) => void,
+    ): () => void;
+    /** Subscribe to per-conversation changes (saves, title edits, deletes). */
+    onChanged(
+      cb: (msg: { id: string; conversation: ConversationFile | null }) => void,
+    ): () => void;
+  };
+  artifacts: {
+    list(filter?: { conversation_id?: string }): Promise<ArtifactIndexEntry[]>;
+    get(id: string): Promise<Artifact | null>;
+    create(input: CreateArtifactInput): Promise<Artifact>;
+    delete(id: string): Promise<void>;
+    /** Resolve a renderable URL for file/url-stored artifacts; null for inline. */
+    resolveUrl(id: string): Promise<string | null>;
+    /** Open a save dialog and write the artifact body to disk. */
+    download(id: string): Promise<{ ok: boolean; path?: string }>;
+    /** Open the canvas window. If `id` is provided, focuses that artifact. */
+    openCanvas(id?: string): Promise<void>;
+    /** Subscribe to artifact create/delete broadcasts. */
+    onChanged(
+      cb: (msg: { id: string; artifact: Artifact | null }) => void,
+    ): () => void;
+    /** Canvas window subscribes to focus-this-artifact pings from main. */
+    onFocus(cb: (id: string) => void): () => void;
+  };
 }
 
 export type DeepPartial<T> = T extends object
@@ -273,5 +324,32 @@ export const IPC = {
     cancel: 'faceplate:typing-bar:cancel',
     opened: 'faceplate:typing-bar:opened',
     dispatch: 'faceplate:typing-bar:dispatch',
+  },
+  conversations: {
+    list: 'faceplate:conversations:list',
+    load: 'faceplate:conversations:load',
+    getActive: 'faceplate:conversations:get-active',
+    create: 'faceplate:conversations:create',
+    setActive: 'faceplate:conversations:set-active',
+    saveActive: 'faceplate:conversations:save-active',
+    updateTitle: 'faceplate:conversations:update-title',
+    archive: 'faceplate:conversations:archive',
+    delete: 'faceplate:conversations:delete',
+    search: 'faceplate:conversations:search',
+    exportMarkdown: 'faceplate:conversations:export-markdown',
+    togglePanel: 'faceplate:conversations:toggle-panel',
+    activeChanged: 'faceplate:conversations:active-changed',
+    changed: 'faceplate:conversations:changed',
+  },
+  artifacts: {
+    list: 'faceplate:artifacts:list',
+    get: 'faceplate:artifacts:get',
+    create: 'faceplate:artifacts:create',
+    delete: 'faceplate:artifacts:delete',
+    resolveUrl: 'faceplate:artifacts:resolve-url',
+    download: 'faceplate:artifacts:download',
+    openCanvas: 'faceplate:artifacts:open-canvas',
+    changed: 'faceplate:artifacts:changed',
+    focus: 'faceplate:artifacts:focus',
   },
 } as const;

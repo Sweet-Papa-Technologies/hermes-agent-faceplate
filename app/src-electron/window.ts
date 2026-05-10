@@ -427,10 +427,190 @@ export function registerWindowIpc(): void {
   ipcMain.on(IPC.typingBar.cancel, () => {
     hideTypingBarWindow();
   });
+
+  ipcMain.handle(IPC.conversations.togglePanel, () => {
+    toggleConversationPanelWindow();
+  });
+
+  ipcMain.handle(IPC.artifacts.openCanvas, (_evt, id?: string) => {
+    showCanvasWindow();
+    if (id) focusArtifactInCanvas(id);
+  });
+}
+
+// ─── conversation panel ─────────────────────────────────────────────────
+//
+// A standalone Spotlight-style window that shows the conversation list +
+// transcript viewer. Toggled by hotkey or tray. Like the typing bar it
+// centers on the active display, ignores OS title bar, and is resizable
+// (unlike the typing bar — this one needs room to read history).
+
+let conversationPanelWindow: BrowserWindow | null = null;
+
+const PANEL_W = 980;
+const PANEL_H = 660;
+
+export function toggleConversationPanelWindow(): void {
+  if (conversationPanelWindow && !conversationPanelWindow.isDestroyed()) {
+    if (conversationPanelWindow.isVisible()) {
+      conversationPanelWindow.hide();
+      return;
+    }
+    conversationPanelWindow.show();
+    conversationPanelWindow.focus();
+    return;
+  }
+
+  const display = activeDisplay();
+  const { workArea } = display;
+  const x = Math.round(workArea.x + (workArea.width - PANEL_W) / 2);
+  const y = Math.round(workArea.y + (workArea.height - PANEL_H) / 2);
+
+  conversationPanelWindow = new BrowserWindow({
+    width: PANEL_W,
+    height: PANEL_H,
+    minWidth: 720,
+    minHeight: 480,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    show: false,
+    title: 'HermesAgent Faceplate — Conversations',
+    icon: path.resolve(currentDir, 'icons/icon.png'),
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      preload: preloadPath(),
+    },
+  });
+  conversationPanelWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  if (conversationPanelWindow.setVisibleOnAllWorkspaces) {
+    conversationPanelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+  conversationPanelWindow.on('closed', () => {
+    conversationPanelWindow = null;
+  });
+  conversationPanelWindow.once('ready-to-show', () => {
+    conversationPanelWindow?.show();
+    conversationPanelWindow?.focus();
+  });
+  void loadRoute(conversationPanelWindow, '/conversation');
+}
+
+export function hideConversationPanelWindow(): void {
+  if (
+    conversationPanelWindow &&
+    !conversationPanelWindow.isDestroyed() &&
+    conversationPanelWindow.isVisible()
+  ) {
+    conversationPanelWindow.hide();
+  }
+}
+
+export function getConversationPanelWindow(): BrowserWindow | null {
+  return conversationPanelWindow;
+}
+
+// ─── canvas window ──────────────────────────────────────────────────────
+//
+// A frameless transparent floater for displaying artifacts (charts,
+// diagrams, images, code, etc.). Unlike the conversation panel this is
+// NOT alwaysOnTop — the user often wants to glance at the canvas while
+// working in another app, so we let it sit at normal z-order. They can
+// still grab it via the hotkey.
+
+let canvasWindow: BrowserWindow | null = null;
+
+const CANVAS_W = 720;
+const CANVAS_H = 560;
+
+export function showCanvasWindow(): void {
+  if (canvasWindow && !canvasWindow.isDestroyed()) {
+    if (!canvasWindow.isVisible()) canvasWindow.show();
+    canvasWindow.focus();
+    return;
+  }
+
+  const display = activeDisplay();
+  const { workArea } = display;
+  const x = Math.round(workArea.x + workArea.width - CANVAS_W - 40);
+  const y = Math.round(workArea.y + 60);
+
+  canvasWindow = new BrowserWindow({
+    width: CANVAS_W,
+    height: CANVAS_H,
+    minWidth: 360,
+    minHeight: 280,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    resizable: true,
+    show: false,
+    title: 'HermesAgent Faceplate — Canvas',
+    icon: path.resolve(currentDir, 'icons/icon.png'),
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      preload: preloadPath(),
+    },
+  });
+  if (canvasWindow.setVisibleOnAllWorkspaces) {
+    canvasWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+  canvasWindow.on('closed', () => {
+    canvasWindow = null;
+  });
+  canvasWindow.once('ready-to-show', () => {
+    canvasWindow?.show();
+  });
+  void loadRoute(canvasWindow, '/canvas');
+}
+
+export function toggleCanvasWindow(): void {
+  if (canvasWindow && !canvasWindow.isDestroyed() && canvasWindow.isVisible()) {
+    canvasWindow.hide();
+    return;
+  }
+  showCanvasWindow();
+}
+
+export function hideCanvasWindow(): void {
+  if (canvasWindow && !canvasWindow.isDestroyed() && canvasWindow.isVisible()) {
+    canvasWindow.hide();
+  }
+}
+
+export function getCanvasWindow(): BrowserWindow | null {
+  return canvasWindow;
+}
+
+/**
+ * Tell the canvas window to switch to a given artifact. Sent on every new
+ * artifact creation if auto-open is enabled, and on user clicks from the
+ * conversation panel transcript / gallery.
+ */
+export function focusArtifactInCanvas(artifactId: string): void {
+  if (!canvasWindow || canvasWindow.isDestroyed()) return;
+  // Ensure it's visible — the user may have hidden it.
+  if (!canvasWindow.isVisible()) canvasWindow.show();
+  canvasWindow.webContents.send(IPC.artifacts.focus, artifactId);
 }
 
 export function quitAll(): void {
   if (avatarWindow && !avatarWindow.isDestroyed()) avatarWindow.close();
   if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
+  if (conversationPanelWindow && !conversationPanelWindow.isDestroyed()) {
+    conversationPanelWindow.close();
+  }
+  if (canvasWindow && !canvasWindow.isDestroyed()) canvasWindow.close();
   app.quit();
 }

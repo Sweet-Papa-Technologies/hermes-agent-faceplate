@@ -6,7 +6,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { applyPatch, getSettings } from './settings-store';
-import { createSettingsWindow, cycleMonitor, quitAll, showHide } from './window';
+import {
+  createSettingsWindow,
+  cycleMonitor,
+  quitAll,
+  showHide,
+  toggleConversationPanelWindow,
+  toggleCanvasWindow,
+} from './window';
 
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -96,6 +103,16 @@ export function rebuildMenu(): void {
       ],
     },
     { type: 'separator' },
+    {
+      label: 'Conversations…',
+      accelerator: s.hotkeys.conversation_panel,
+      click: () => toggleConversationPanelWindow(),
+    },
+    {
+      label: 'Canvas…',
+      accelerator: s.hotkeys.canvas,
+      click: () => toggleCanvasWindow(),
+    },
     process.platform === 'darwin'
       ? { label: 'Settings…', accelerator: 'Cmd+,', click: () => createSettingsWindow() }
       : { label: 'Settings…', click: () => createSettingsWindow() },

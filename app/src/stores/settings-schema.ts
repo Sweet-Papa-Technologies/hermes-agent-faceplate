@@ -15,6 +15,8 @@ export const HotkeyNames = [
   'cycle_monitor',
   'replay',
   'interrupt',
+  'conversation_panel',
+  'canvas',
 ] as const;
 export type HotkeyName = (typeof HotkeyNames)[number];
 
@@ -23,6 +25,15 @@ export const HermesSettings = z.object({
   api_key: z.string().default(''),
   config_path: z.string().default('~/.hermes/config.yaml'),
   install_shell_hook: z.boolean().default(false),
+  /**
+   * When true (default) the Faceplate auto-installs the `faceplate-canvas`
+   * skill into ~/.hermes/skills/ on every boot. The skill teaches Hermes
+   * the inline <artifact> tag protocol so visualizations render in the
+   * canvas window without each user having to hand-edit their prompt.
+   *
+   * Idempotent: missing → write; older version → upgrade; same/newer → leave.
+   */
+  install_canvas_skill: z.boolean().default(true),
 });
 
 // Paraphrase model routing.
@@ -110,6 +121,11 @@ export const HotkeysSettings = z.object({
   cycle_monitor: HotkeyAccelerator.default('CommandOrControl+Shift+M'),
   replay: HotkeyAccelerator.default('CommandOrControl+Shift+R'),
   interrupt: HotkeyAccelerator.default('CommandOrControl+.'),
+  // Cmd+Shift+J on macOS / Ctrl+Shift+J on Win+Linux — unbound by default
+  // on all three. (Avoiding `Shift+H`, which collides with `show_hide`.)
+  conversation_panel: HotkeyAccelerator.default('CommandOrControl+Shift+J'),
+  // Toggles the canvas (artifact viewer) window.
+  canvas: HotkeyAccelerator.default('CommandOrControl+Shift+K'),
 });
 
 export const AvatarSettings = z.object({

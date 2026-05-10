@@ -14,6 +14,8 @@ import type { FaceplatePreload } from '../../src-electron/preload-api';
 import { useSettingsStore } from '../stores/settings';
 import { useThemeStore } from '../stores/theme';
 import { useDiscoveryStore } from '../stores/discovery';
+import { useConversationsStore } from '../stores/conversations';
+import { useArtifactsStore } from '../stores/artifacts';
 import { eventBus, wirePreloadBridge } from './event-bus';
 
 declare global {
@@ -39,4 +41,33 @@ export default boot(async () => {
     () => [settings.settings.hermes.config_path, settings.settings.hermes.base_url],
     () => void discovery.refresh(),
   );
+
+  // Conversations: load list + active in every window. The audio renderer
+  // additionally attaches a syncer (in audio.ts boot) that persists turns
+  // and reacts to cross-window switches.
+  const convs = useConversationsStore();
+  await convs.load();
+  // Keep every window's view of the conversation list (and the active
+  // conversation's turns) in sync with disk. Broadcasts from main arrive
+  // whenever any window saves, switches, edits, or deletes.
+  if (window.faceplate) {
+    window.faceplate.conversations.onChanged((msg) => {
+      void convs.refreshList();
+      convs.applyChanged(msg);
+    });
+    window.faceplate.conversations.onActiveChanged((msg) => {
+      convs.applyActiveChanged(msg);
+      void convs.refreshList();
+    });
+  }
+
+  // Artifacts: load list in every window. Subscribe to broadcasts so
+  // canvas + panel + overlay all stay in sync as artifacts come and go.
+  const artifactsStore = useArtifactsStore();
+  await artifactsStore.refreshList();
+  if (window.faceplate) {
+    window.faceplate.artifacts.onChanged((msg) => {
+      artifactsStore.applyChanged(msg);
+    });
+  }
 });

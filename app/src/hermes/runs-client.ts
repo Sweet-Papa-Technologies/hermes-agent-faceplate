@@ -16,6 +16,14 @@ export interface RunsEndpoint {
   baseUrl: string;          // e.g. 'http://127.0.0.1:8642/v1'
   apiKey?: string;
   sessionId?: string;
+  /**
+   * System prompt addendum injected on every request via hermes-agent's
+   * `instructions` field (maps to ephemeral_system_prompt in their adapter).
+   * Used to force the artifact output protocol into the system prompt
+   * without relying on the model deciding to skill_view() the relevant
+   * skill — see canvas-skill-installer.ts for the standalone skill body.
+   */
+  instructions?: string;
 }
 
 export type RunEvent =
@@ -60,6 +68,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunHandle> {
 
   const startBody: Record<string, unknown> = { input: opts.input };
   if (opts.endpoint.sessionId) startBody.session_id = opts.endpoint.sessionId;
+  if (opts.endpoint.instructions) startBody.instructions = opts.endpoint.instructions;
 
   console.log('[runs-client] POST', url, 'auth=', headers.authorization ? `Bearer …${(headers.authorization as string).slice(-6)}` : '(none)');
 

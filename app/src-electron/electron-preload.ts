@@ -17,6 +17,16 @@ import {
 import type { FaceplateSettings, HotkeyName } from '../src/stores/settings-schema';
 import type { FaceplateEvent } from '../src/hermes/event-schema';
 import type { AvatarThemeManifest } from '../src/themes/manifest-schema';
+import type {
+  ConversationFile,
+  ConversationManifestEntry,
+  PersistedTurn,
+} from '../src/stores/conversation-types';
+import type {
+  Artifact,
+  ArtifactIndexEntry,
+  CreateArtifactInput,
+} from '../src/stores/artifact-types';
 
 const settings: FaceplatePreload['settings'] = {
   get: () => ipcRenderer.invoke(IPC.settings.get),
@@ -118,6 +128,74 @@ const typingBar: FaceplatePreload['typingBar'] = {
   },
 };
 
+const conversations: FaceplatePreload['conversations'] = {
+  list: (): Promise<ConversationManifestEntry[]> =>
+    ipcRenderer.invoke(IPC.conversations.list),
+  load: (id: string): Promise<ConversationFile | null> =>
+    ipcRenderer.invoke(IPC.conversations.load, id),
+  getActive: (): Promise<ConversationFile | null> =>
+    ipcRenderer.invoke(IPC.conversations.getActive),
+  create: (title?: string): Promise<ConversationFile> =>
+    ipcRenderer.invoke(IPC.conversations.create, title),
+  setActive: (id: string): Promise<ConversationFile | null> =>
+    ipcRenderer.invoke(IPC.conversations.setActive, id),
+  saveActive: (turns: PersistedTurn[], sessionId: string | null) =>
+    ipcRenderer.invoke(IPC.conversations.saveActive, turns, sessionId),
+  updateTitle: (id: string, title: string) =>
+    ipcRenderer.invoke(IPC.conversations.updateTitle, id, title),
+  archive: (id: string) => ipcRenderer.invoke(IPC.conversations.archive, id),
+  delete: (id: string) => ipcRenderer.invoke(IPC.conversations.delete, id),
+  search: (query: string) => ipcRenderer.invoke(IPC.conversations.search, query),
+  exportMarkdown: (id: string) =>
+    ipcRenderer.invoke(IPC.conversations.exportMarkdown, id),
+  togglePanel: () => ipcRenderer.invoke(IPC.conversations.togglePanel),
+  onActiveChanged: (cb) => {
+    const listener = (
+      _e: unknown,
+      msg: { id: string | null; conversation: ConversationFile | null },
+    ) => cb(msg);
+    ipcRenderer.on(IPC.conversations.activeChanged, listener);
+    return () =>
+      ipcRenderer.removeListener(IPC.conversations.activeChanged, listener);
+  },
+  onChanged: (cb) => {
+    const listener = (
+      _e: unknown,
+      msg: { id: string; conversation: ConversationFile | null },
+    ) => cb(msg);
+    ipcRenderer.on(IPC.conversations.changed, listener);
+    return () =>
+      ipcRenderer.removeListener(IPC.conversations.changed, listener);
+  },
+};
+
+const artifacts: FaceplatePreload['artifacts'] = {
+  list: (filter?: { conversation_id?: string }): Promise<ArtifactIndexEntry[]> =>
+    ipcRenderer.invoke(IPC.artifacts.list, filter),
+  get: (id: string): Promise<Artifact | null> =>
+    ipcRenderer.invoke(IPC.artifacts.get, id),
+  create: (input: CreateArtifactInput): Promise<Artifact> =>
+    ipcRenderer.invoke(IPC.artifacts.create, input),
+  delete: (id: string) => ipcRenderer.invoke(IPC.artifacts.delete, id),
+  resolveUrl: (id: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.artifacts.resolveUrl, id),
+  download: (id: string) => ipcRenderer.invoke(IPC.artifacts.download, id),
+  openCanvas: (id?: string) => ipcRenderer.invoke(IPC.artifacts.openCanvas, id),
+  onChanged: (cb) => {
+    const listener = (
+      _e: unknown,
+      msg: { id: string; artifact: Artifact | null },
+    ) => cb(msg);
+    ipcRenderer.on(IPC.artifacts.changed, listener);
+    return () => ipcRenderer.removeListener(IPC.artifacts.changed, listener);
+  },
+  onFocus: (cb) => {
+    const listener = (_e: unknown, id: string) => cb(id);
+    ipcRenderer.on(IPC.artifacts.focus, listener);
+    return () => ipcRenderer.removeListener(IPC.artifacts.focus, listener);
+  },
+};
+
 const api: FaceplatePreload = {
   settings,
   hermes,
@@ -129,6 +207,8 @@ const api: FaceplatePreload = {
   events,
   platform,
   typingBar,
+  conversations,
+  artifacts,
 };
 
 contextBridge.exposeInMainWorld('faceplate', api);

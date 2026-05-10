@@ -29,6 +29,12 @@ import { registerHookIpc } from './hook-installer';
 import { startHookListener, stopHookListener } from './hook-listener';
 import { registerEventBridgeIpc } from './event-bridge';
 import { registerPlatformIpc } from './platform-bridge';
+import {
+  ensureBootstrapConversation,
+  registerConversationsIpc,
+} from './conversation-store';
+import { registerArtifactsIpc } from './artifact-store';
+import { ensureCanvasSkillInstalled } from './canvas-skill-installer';
 
 // One-shot: seed `hermes.api_key` from ~/.hermes/.env when empty. The wizard
 // asks the user to paste the key by hand; if they skipped that field but
@@ -190,6 +196,17 @@ void app.whenReady().then(() => {
   registerHookIpc();
   registerEventBridgeIpc();
   registerPlatformIpc();
+  registerConversationsIpc();
+  registerArtifactsIpc();
+
+  // Make sure there's an active conversation on disk so the renderer always
+  // has somewhere to land. Creates a fresh empty one on first run.
+  ensureBootstrapConversation();
+
+  // Auto-install the Hermes-side skill that teaches the model the inline
+  // <artifact> output protocol. Idempotent + version-gated so user edits
+  // don't get clobbered. Silent no-op if ~/.hermes doesn't exist yet.
+  ensureCanvasSkillInstalled();
 
   seedHermesApiKeyFromLocalEnv();
   seedSidecarTokenFromMakefileCache();

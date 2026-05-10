@@ -14,12 +14,15 @@
 import { eventBus } from '../boot/event-bus';
 import { useAgentStore } from '../stores/agent';
 import { useConversationStore } from '../stores/conversation';
+import { useConversationsStore } from '../stores/conversations';
 import { useSettingsStore } from '../stores/settings';
 import { useDiscoveryStore } from '../stores/discovery';
 import { streamChat, type ChatEndpoint, type ChatTurn } from './chat-client';
 import { startRun, type RunHandle, type RunsEndpoint } from './runs-client';
 import { paraphrase } from './paraphrase';
 import { stripForSpeech } from './strip-for-speech';
+import { extractArtifacts } from './extract-artifacts';
+import { CANVAS_PROTOCOL_INSTRUCTIONS } from './canvas-instructions';
 import { speakStream, type SpeakHandle } from '../audio/tts-client';
 import { startVisemeDriver, type DriverHandle } from '../audio/viseme-driver';
 import { suspendAudio, resumeAudio } from '../audio/audio-context';
@@ -36,7 +39,25 @@ let active: ActiveTurn | null = null;
 let attached = false;
 let detach: (() => void) | null = null;
 
-let lastSessionId: string | null = null;
+// Session id for hermes-agent's /v1/runs is sourced from the active
+// conversation, NOT a module variable. That way it survives app restarts
+// (loaded from disk on boot) and follows the user across conversation
+// switches without the turn-handler needing to know about either flow.
+function getActiveSessionId(): string | null {
+  return useConversationsStore().activeSessionId ?? null;
+}
+
+function rememberSessionId(sid: string): void {
+  const convs = useConversationsStore();
+  const convo = useConversationStore();
+  if (convs.activeSessionId === sid) return;
+  convs.setActiveSessionIdLocal(sid);
+  // Persist the session id immediately. Without this, a crash between the
+  // first server response and the assistant turn finalize would lose the
+  // handle to hermes' server-side conversation memory.
+  void convs.saveActive(convo.snapshotForPersist(), sid);
+}
+
 let turnCount = 0;
 let speakCount = 0;
 
@@ -154,6 +175,18 @@ async function runTurn(userText: string): Promise<void> {
   // and the user hears two voices talking over each other.
   if (active !== handle) return;
 
+  // Extract any inline <artifact> tags from the assistant response. Each
+  // tag becomes a persisted artifact; the in-flight turn's text is
+  // rewritten without the tags so captions, conversation panel, and TTS
+  // all see the prose only. Done BEFORE paraphrase so the paraphrase
+  // model isn't asked to rephrase JSON / chart configs / mermaid source.
+  const extracted = extractArtifacts(assistantText);
+  if (extracted.artifacts.length > 0) {
+    assistantText = extracted.cleanedText;
+    convo.setText(assistantText);
+    void persistAndAttachArtifacts(handle, extracted.artifacts);
+  }
+
   // Paraphrase pass — defer to main process which holds the LLM api key.
   let spokenText = assistantText;
   let paraphraseText: string | undefined;
@@ -206,7 +239,7 @@ async function consumeRuns(
     signal: handle.abort.signal,
   });
   handle.run = run;
-  if (run.sessionId) lastSessionId = run.sessionId;
+  if (run.sessionId) rememberSessionId(run.sessionId);
 
   const convo = useConversationStore();
   let buffered = '';
@@ -238,6 +271,15 @@ async function consumeRuns(
         });
         break;
       case 'tool_call':
+        // Persist on the in-flight turn so it shows up in the conversation
+        // panel transcript next to the assistant's text, not just as a
+        // transient toast on the avatar.
+        convo.appendToolCall({
+          tool: evt.tool,
+          args_preview: evt.argsPreview,
+          status: evt.status,
+          ts: Date.now(),
+        });
         eventBus.emit({
           type: 'agent.tool_call',
           ts: Date.now(),
@@ -373,7 +415,41 @@ async function speakAndAnimate(
 // ------------------------------------------------------------------ helpers
 
 function buildMessages(userText: string): ChatTurn[] {
-  return [{ role: 'user', content: userText }];
+  // Prepend the artifact protocol as a system message so the OpenAI-compat
+  // chat path enforces the same output contract as /v1/runs.
+  return [
+    { role: 'system', content: CANVAS_PROTOCOL_INSTRUCTIONS },
+    { role: 'user', content: userText },
+  ];
+}
+
+async function persistAndAttachArtifacts(
+  handle: ActiveTurn,
+  artifacts: ReturnType<typeof extractArtifacts>['artifacts'],
+): Promise<void> {
+  const fp = window.faceplate;
+  const convs = useConversationsStore();
+  const convo = useConversationStore();
+  if (!fp || !convs.activeId) return;
+  const turnId = convo.currentTurn?.id ?? null;
+  let firstId: string | null = null;
+  for (const item of artifacts) {
+    if (active !== handle) return;
+    try {
+      const created = await fp.artifacts.create({
+        ...item.input,
+        conversation_id: convs.activeId,
+        turn_id: turnId,
+      });
+      convo.attachArtifact(created.id);
+      if (!firstId) firstId = created.id;
+    } catch (err) {
+      console.warn('[turn-handler] artifact create failed:', err);
+    }
+  }
+  // Auto-open the canvas focused on the latest artifact. Spec choice: most
+  // recent takes focus, prev/next nav steps backward through history.
+  if (firstId) void fp.artifacts.openCanvas(firstId);
 }
 
 function chatEndpointFromSettings(
@@ -395,10 +471,14 @@ function runsEndpointFromSettings(
 ): RunsEndpoint | null {
   const h = settings.settings.hermes;
   if (!h.base_url) return null;
+  const sid = getActiveSessionId();
   return {
     baseUrl: h.base_url.replace(/\/$/, ''),
     ...(h.api_key ? { apiKey: h.api_key } : {}),
-    ...(lastSessionId ? { sessionId: lastSessionId } : {}),
+    ...(sid ? { sessionId: sid } : {}),
+    // Always inject the artifact protocol as ephemeral_system_prompt.
+    // Stable string → server-side prompt caching keeps this cheap.
+    instructions: CANVAS_PROTOCOL_INSTRUCTIONS,
   };
 }
 

@@ -15,6 +15,10 @@ import { useSettingsStore } from '../stores/settings';
 import { attachPttController, detachPttController } from '../audio/ptt-controller';
 import { startWakeClient, stopWakeClient } from '../audio/wake-client';
 import { attachTurnHandler, interrupt as interruptTurn } from '../hermes/turn-handler';
+import {
+  attachConversationSyncer,
+  detachConversationSyncer,
+} from '../conversations/conversation-syncer';
 
 export default boot(({ router }) => {
   // Audio pipeline must initialise in EXACTLY one renderer — the overlay /
@@ -36,6 +40,10 @@ export default boot(({ router }) => {
 
   attachTurnHandler();
   attachPttController();
+  // Conversation persistence: hydrate the live buffer from the active
+  // conversation on disk, persist on every finalize, follow cross-window
+  // switches initiated by the conversation panel.
+  attachConversationSyncer();
 
   const settings = useSettingsStore();
   watch(
@@ -81,6 +89,7 @@ export default boot(({ router }) => {
     import.meta.hot.dispose(() => {
       detachPttController();
       stopWakeClient();
+      detachConversationSyncer();
     });
   }
 });

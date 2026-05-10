@@ -14,7 +14,14 @@ import {
 } from '../src/stores/settings-schema';
 import { IPC, type RegisterResult } from './preload-api';
 import { getSettings } from './settings-store';
-import { cycleMonitor, getAvatarWindow, showHide, showTypingBarWindow } from './window';
+import {
+  cycleMonitor,
+  getAvatarWindow,
+  showHide,
+  showTypingBarWindow,
+  toggleConversationPanelWindow,
+  toggleCanvasWindow,
+} from './window';
 
 interface FallbackPlan {
   primary: string;
@@ -40,6 +47,12 @@ function defaultHandler(name: HotkeyName): () => void {
         // Owned by main: open the standalone centered typing window on the
         // active display. Toggle if already visible (show again-> hide).
         showTypingBarWindow();
+        return;
+      case 'conversation_panel':
+        toggleConversationPanelWindow();
+        return;
+      case 'canvas':
+        toggleCanvasWindow();
         return;
       default:
         broadcastPress(name);
