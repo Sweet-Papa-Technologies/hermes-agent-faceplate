@@ -68,13 +68,44 @@ export function extractArtifacts(text: string): ExtractResult {
     const body = bodyRaw.trim();
     const input = buildInput(kind, body, attrs);
     if (input) artifacts.push({ input });
-    return ''; // strip from cleaned text
+    // Replace the tag with a brief placeholder rather than emptying it.
+    // Three reasons:
+    //   1. If the model's response is MOSTLY artifact tags with little
+    //      surrounding prose, stripping to "" leaves the conversation
+    //      transcript with no visible text — the user sees only chips
+    //      and assumes nothing was said.
+    //   2. Captions stream the raw text mid-turn; if we collapse to ""
+    //      after stream-end the bubble vanishes mid-read.
+    //   3. TTS still reads the placeholder, but as natural prose
+    //      ("chart Sales Q3") rather than "left-bracket chart…".
+    return placeholderFor(kind, attrs);
   });
 
   return {
     cleanedText: tidyWhitespace(cleanedText),
     artifacts,
   };
+}
+
+const KIND_LABELS: Record<ArtifactKind, string> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  text: 'document',
+  code: 'code',
+  chart: 'chart',
+  diagram: 'diagram',
+  visual: 'visual',
+};
+
+function placeholderFor(kind: ArtifactKind, attrs: Record<string, string>): string {
+  const label = KIND_LABELS[kind];
+  const title = (attrs.title ?? '').trim();
+  // Plain parens read naturally in TTS ("chart Sales Q3") and the
+  // conversation panel renders them inline. Padded with spaces so the
+  // tag site doesn't fuse with adjacent words after collapse.
+  if (title) return ` (${label}: ${title}) `;
+  return ` (${label}) `;
 }
 
 function parseAttrs(raw: string): Record<string, string> {
@@ -127,7 +158,14 @@ function buildInput(
 }
 
 function tidyWhitespace(s: string): string {
-  // Collapse the blank lines artifact tags leave behind, but preserve
-  // intentional paragraph breaks elsewhere.
-  return s.replace(/\n{3,}/g, '\n\n').trim();
+  // 1. Collapse run-on spaces from the ` (chart) ` padding (two adjacent
+  //    placeholders produce `  (chart)   (image)  `).
+  // 2. Strip double spaces but preserve newlines.
+  // 3. Collapse 3+ consecutive newlines to a paragraph break.
+  return s
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ \n/g, '\n')
+    .replace(/\n /g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
