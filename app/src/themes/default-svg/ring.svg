@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <g id="state-ring">
+    <circle class="state-ring-racer"
+            cx="128" cy="128" r="116"
+            fill="none" stroke="currentColor" stroke-width="8"
+            stroke-linecap="round"
+            pathLength="100" stroke-dasharray="18 82"
+            stroke-dashoffset="0" />
     <circle cx="128" cy="128" r="116" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-dasharray="6 8" opacity="0.85" />
     <circle cx="128" cy="128" r="120" fill="none" stroke="currentColor" stroke-width="2" opacity="0.35" />
   </g>

@@ -1,8 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
   <!-- State ring: rounded-rect halo around the robot face plate.
        `currentColor` is set by the renderer per agent state
-       (idle / listening / thinking / speaking / error). -->
+       (idle / listening / thinking / speaking / error).
+
+       Composed of three layers, all sharing the same rounded-rect path
+       so they stack perfectly:
+         - racer:   "comet head" that travels around the perimeter when
+                    the agent is thinking. pathLength=100 normalises
+                    dash math regardless of actual perimeter.
+         - dashed:  decorative dashed outline (same as before).
+         - outline: faint outer border. -->
   <g id="state-ring">
+    <rect class="state-ring-racer"
+          x="42" y="62" width="316" height="296" rx="68"
+          fill="none" stroke="currentColor" stroke-width="8"
+          stroke-linecap="round"
+          pathLength="100" stroke-dasharray="18 82"
+          stroke-dashoffset="0" />
     <rect x="42" y="62" width="316" height="296" rx="68"
           fill="none" stroke="currentColor" stroke-width="6"
           stroke-linecap="round" stroke-dasharray="8 10" opacity="0.85" />

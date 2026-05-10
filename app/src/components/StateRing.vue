@@ -27,6 +27,18 @@ const tint = computed(() => theme.ringTintFor(state.value));
   transition: color 280ms ease;
 }
 
+/* The "racer" element exists in every theme's ring.svg — a stroke with
+ * pathLength=100 + stroke-dasharray="18 82" so 18% of the perimeter is
+ * visible. We animate stroke-dashoffset to make that visible segment
+ * travel along the perimeter, which works for circles AND rounded rects
+ * (or any closed path). The racer is hidden by default; only the
+ * thinking state reveals it. Old approach (CSS rotate on the whole ring)
+ * spun rectangular halos around their center which looked broken. */
+.state-ring :deep(.state-ring-racer) {
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
 /* idle: gentle 4s breathe */
 .state-idle {
   animation: ring-pulse 4000ms ease-in-out infinite;
@@ -37,10 +49,11 @@ const tint = computed(() => theme.ringTintFor(state.value));
   animation: ring-pulse 2000ms ease-in-out infinite;
 }
 
-/* thinking: rotating arc */
-.state-thinking {
-  transform-origin: 128px 128px;
-  animation: ring-spin 1800ms linear infinite;
+/* thinking: a comet head races around the perimeter — shape-aware,
+ * unlike a transform: rotate which only looks right on circles. */
+.state-thinking :deep(.state-ring-racer) {
+  opacity: 1;
+  animation: ring-race 1800ms linear infinite;
 }
 
 /* speaking: hold steady — mouth carries the motion */
@@ -58,9 +71,12 @@ const tint = computed(() => theme.ringTintFor(state.value));
   50%      { opacity: 1; }
 }
 
-@keyframes ring-spin {
-  from { transform: rotate(0); }
-  to   { transform: rotate(360deg); }
+/* Negative offset = clockwise travel. With pathLength=100 set on the
+ * racer element, going from 0 to -100 traces the full perimeter exactly
+ * once per iteration. */
+@keyframes ring-race {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
 }
 
 @keyframes ring-shake {
