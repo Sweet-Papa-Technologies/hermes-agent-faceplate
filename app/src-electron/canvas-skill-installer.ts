@@ -23,7 +23,7 @@ const SKILL_FILENAME = 'SKILL.md';
 // Bump this when the skill body materially changes — old installs will be
 // upgraded on next boot. User-edited copies that bump their own version
 // past ours stay untouched.
-const SKILL_VERSION = '1.3.0';
+const SKILL_VERSION = '1.4.0';
 
 function hermesHome(): string {
   if (process.env.HERMES_HOME) return process.env.HERMES_HOME;
@@ -241,6 +241,57 @@ Examples of media query handling:
 | "play some lo-fi" | \`web_search("lo-fi beats spotify playlist")\` → \`<artifact type="audio" title="Lo-Fi">spotify URL</artifact>\` |
 | "show me pictures of red pandas" | \`web_search("red panda images")\` → multiple \`<artifact type="image">URL</artifact>\` tags (one per image, nav-able) |
 | "find a tutorial video about CSS grid" | \`web_search("CSS grid tutorial youtube")\` → \`<artifact type="video">URL</artifact>\` |
+
+## File output — when the user asks you to MAKE a file
+
+**Do not write files to disk via the terminal tool.** The user runs the Faceplate on a different machine from your container — they cannot reach \`/tmp/file.csv\` or any path you create. Files written there are invisible to them and lost on container restart.
+
+**Instead**, emit the file content as an artifact. The canvas previews it; the user clicks the download button (⤓) to save it locally with the correct extension. The artifact's \`title\` becomes the suggested filename — use a friendly name with no extension and the renderer adds the right one (e.g. \`title="sales_q3"\` + \`type="code" lang="csv"\` → downloads as \`sales_q3.csv\`).
+
+| File kind | Artifact form | Notes |
+|---|---|---|
+| CSV / TSV | \`<artifact type="code" lang="csv">\` | Renders as a styled, sortable table. |
+| JSON | \`<artifact type="code" lang="json">\` | Syntax-highlighted; user can also see the raw structure. |
+| Markdown doc | \`<artifact type="text">\` | Rendered with full markdown formatting. |
+| Plain text / log | \`<artifact type="text">\` | Same as markdown but treats body as text. |
+| HTML page | \`<artifact type="code" lang="html">\` | Gets a Preview tab + Source tab. |
+| Source code | \`<artifact type="code" lang="<lang>">\` | Specify lang for highlighting. |
+| Binary (images, video, audio) | \`<artifact type="image">URL</artifact>\` etc. | Use a URL or data:URI; do NOT base64-paste raw binary inline. |
+
+### Examples
+
+\`\`\`
+<artifact type="code" lang="csv" title="Q3 Sales Data">
+month,product,units,revenue
+Jul,Widget,120,1450
+Aug,Widget,140,1690
+Sep,Widget,95,1140
+</artifact>
+\`\`\`
+
+\`\`\`
+<artifact type="code" lang="json" title="Service Config">
+{
+  "name": "myservice",
+  "port": 8080,
+  "features": ["auth", "logging"]
+}
+</artifact>
+\`\`\`
+
+\`\`\`
+<artifact type="text" title="Meeting Notes - 2026-05-10">
+# Meeting Notes — May 10
+
+## Decisions
+- Ship v2 by end of June
+- Drop Windows 7 support
+
+## Action items
+- [ ] @forrester review the API spec
+- [ ] @sam wire up the Stripe webhook
+</artifact>
+\`\`\`
 
 ## What NOT to do
 

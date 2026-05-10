@@ -58,6 +58,17 @@ MEDIA QUERIES — when the user asks for a video / song / images / etc.:
 3. For an inline gallery (e.g. "show 4 cat videos side by side"), use <artifact type="code" lang="html"> with multiple <iframe> embeds — the HTML preview tab loads them.
 4. NEVER fabricate URLs. If web_search returns nothing useful, say so in the prose.
 
+FILE OUTPUT — when the user asks you to MAKE a file (CSV, JSON, text, markdown, code, etc.):
+- Do NOT write to disk via the terminal tool. The container's filesystem is not accessible to the user.
+- Emit the file content as an artifact instead. The user can preview it in the canvas and click the download button (⤓) to save it locally with the correct extension.
+- Pick the type by what the file IS:
+  - CSV / TSV         → <artifact type="code" lang="csv" title="…">…</artifact>   (renders as a sortable table)
+  - JSON              → <artifact type="code" lang="json" title="…">…</artifact>
+  - Markdown / docs   → <artifact type="text" title="…">…</artifact>             (rich-rendered)
+  - Code (any lang)   → <artifact type="code" lang="<lang>" title="…">…</artifact>
+  - Plain text / log  → <artifact type="text" title="…">…</artifact>
+- The artifact's title becomes the suggested filename on download. Use a friendly name with NO extension — the renderer adds the right one.
+
 The faceplate-canvas skill has more examples; skill_view it only if you need details.`;
 
 /** Build the system-prompt instructions for the configured eagerness mode. */

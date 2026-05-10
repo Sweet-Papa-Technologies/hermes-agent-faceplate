@@ -9,6 +9,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 
 import type { Artifact } from '../../stores/artifact-types';
+import { parseLooseJson } from './extract-json';
 
 interface ChartLikeConfig {
   type?: string;
@@ -28,7 +29,11 @@ async function render(): Promise<void> {
 
   let cfg: ChartLikeConfig;
   try {
-    cfg = JSON.parse(props.artifact.body) as ChartLikeConfig;
+    // Tolerant parse — strips ```json fences, ignores trailing prose / a
+    // stray "// comment" after the closing brace, etc. Models occasionally
+    // wrap or pad the body; surface the actual chart instead of a parse
+    // error when the JSON itself is valid.
+    cfg = parseLooseJson<ChartLikeConfig>(props.artifact.body);
   } catch (err) {
     error.value = `Invalid chart JSON: ${err instanceof Error ? err.message : String(err)}`;
     return;
