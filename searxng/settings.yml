@@ -1,0 +1,59 @@
+# SearXNG settings tuned for programmatic use by hermes-agent.
+# Only the keys that diverge from the upstream defaults are listed here;
+# everything else is filled in by the image's settings.yml on first boot.
+
+use_default_settings: true
+
+general:
+  instance_name: "Faceplate-SearXNG"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json   # ← required: hermes' web_search hits the JSON endpoint
+
+server:
+  # The bind address inside the container; the host port mapping in
+  # docker-compose.yml exposes this on 127.0.0.1:9080.
+  bind_address: "0.0.0.0"
+  port: 8080
+  # Empty `secret_key` would prevent the container from starting. We
+  # pre-generate one here so the user doesn't have to. Override by
+  # editing this file or via the SEARXNG_SECRET env var.
+  secret_key: "faceplate-default-not-secret-set-your-own-if-you-care"
+  limiter: false
+  image_proxy: false
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Robots-Tag: noindex, nofollow
+  http_protocol_version: "1.0"
+
+ui:
+  static_use_hash: true
+
+# Disable result-count-killing engines that need API keys / heavy CAPTCHAs
+# by default. Users can re-enable any of them in this file.
+engines:
+  - name: google
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: github
+    disabled: false
+  - name: stackoverflow
+    disabled: false
+  - name: reddit
+    disabled: false

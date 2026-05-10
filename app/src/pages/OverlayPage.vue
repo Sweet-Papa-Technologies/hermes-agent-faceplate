@@ -1,6 +1,7 @@
 <template>
   <div class="overlay-page" :class="`mode-${settings.mode}`">
     <Avatar />
+    <ToolBadge />
     <Captions />
     <TypingBar ref="typingBarRef" />
   </div>
@@ -11,6 +12,7 @@ import { onMounted, onBeforeUnmount, ref } from 'vue';
 
 import Avatar from '../components/Avatar.vue';
 import Captions from '../components/Captions.vue';
+import ToolBadge from '../components/ToolBadge.vue';
 import TypingBar from '../components/TypingBar.vue';
 import { useSettingsStore } from '../stores/settings';
 import { useConversationStore } from '../stores/conversation';

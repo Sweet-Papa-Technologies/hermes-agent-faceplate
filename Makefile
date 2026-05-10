@@ -30,8 +30,10 @@ RESET  := \033[0m
 
 .PHONY: help setup up down restart logs verify app clean check-prereqs \
         hermes-up hermes-down hermes-logs hermes-agent-log hermes-errors hermes-last-run \
+        hermes-configure-tools \
         litert-up litert-down litert-logs litert-status \
         llm-tunnel-up llm-tunnel-down llm-tunnel-status llm-tunnel-logs \
+        searxng-up searxng-down searxng-logs searxng-status \
         all
 
 help:                ## list targets
@@ -215,6 +217,31 @@ llm-tunnel-status:   ## show llm-tunnel status
 llm-tunnel-logs:     ## tail llm-tunnel log
 	@if [ -f "$(LLM_TUNNEL_LOG)" ]; then tail -f "$(LLM_TUNNEL_LOG)"; else \
 		printf "$(YELLOW)·$(RESET) no log yet — run \`make llm-tunnel-up\` first\n"; fi
+
+# ─── searxng (free local web search backend for hermes) ─────────────────
+
+SEARXNG_COMPOSE := $(HERE)/searxng/docker-compose.yml
+
+searxng-up:          ## start SearXNG on 127.0.0.1:9080 + configure hermes to use it
+	@bash $(HERE)/scripts/start-searxng.sh
+
+searxng-down:        ## stop SearXNG (volumes preserved)
+	@docker compose -f $(SEARXNG_COMPOSE) down 2>/dev/null && \
+		printf "$(GREEN)✓$(RESET) searxng stopped\n" || \
+		printf "$(YELLOW)·$(RESET) searxng wasn't running\n"
+
+searxng-logs:        ## tail searxng container logs
+	@docker compose -f $(SEARXNG_COMPOSE) logs -f searxng
+
+searxng-status:      ## show searxng status
+	@if docker ps --format '{{.Names}}' | grep -qx searxng; then \
+		printf "$(GREEN)✓$(RESET) searxng running on http://127.0.0.1:9080\n"; \
+	else \
+		printf "$(RED)✗$(RESET) searxng not running\n"; \
+	fi
+
+hermes-configure-tools: ## (re)patch ~/.hermes/config.yaml + .env for web + browser toolsets
+	@python3 $(HERE)/scripts/configure-hermes-tools.py
 
 all: hermes-up litert-up setup up ## bring everything up except the Electron app (then run `make app`)
 	@printf "\n$(GREEN)Everything is running.$(RESET) Now: $(YELLOW)make app$(RESET)\n"
