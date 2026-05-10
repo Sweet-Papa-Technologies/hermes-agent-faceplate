@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <!-- State ring: rounded-rect halo around the robot face plate.
+       `currentColor` is set by the renderer per agent state
+       (idle / listening / thinking / speaking / error). -->
+  <g id="state-ring">
+    <rect x="42" y="62" width="316" height="296" rx="68"
+          fill="none" stroke="currentColor" stroke-width="6"
+          stroke-linecap="round" stroke-dasharray="8 10" opacity="0.85" />
+    <rect x="36" y="56" width="328" height="308" rx="74"
+          fill="none" stroke="currentColor" stroke-width="2" opacity="0.35" />
+  </g>
+</svg>

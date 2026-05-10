@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "robo",
+  "name": "Robo",
+  "author": "HermesAgent Faceplate",
+  "license": "MIT",
+  "canvas": { "width": 400, "height": 400, "bg": "transparent" },
+  "layers": {
+    "head": { "src": "head.svg" },
+    "state_ring": {
+      "src": "ring.svg",
+      "tint_per_state": {
+        "idle": "#a4a4a4",
+        "listening": "#06b6d4",
+        "thinking": "#f59e0b",
+        "speaking": "#22c55e",
+        "error": "#ef4444"
+      }
+    }
+  },
+  "visemes": {
+    "A": "<g id=\"viseme-A\"><rect x=\"160\" y=\"275\" width=\"6\" height=\"30\" rx=\"3\" fill=\"#46b5e5\"/><rect x=\"172\" y=\"272\" width=\"6\" height=\"36\" rx=\"3\" fill=\"#46b5e5\"/><rect x=\"184\" y=\"269\" width=\"6\" height=\"42\" rx=\"3\" fill=\"#7fdcff\"/><rect x=\"196\" y=\"272\" width=\"6\" height=\"36\" rx=\"3\" fill=\"#46b5e5\"/><rect x=\"208\" y=\"275\" width=\"6\" height=\"30\" rx=\"3\" fill=\"#46b5e5\"/><rect x=\"220\" y=\"278\" width=\"6\" height=\"24\" rx=\"3\" fill=\"#3aa0d0\"/><rect x=\"232\" y=\"283\" width=\"6\" height=\"14\" rx=\"3\" fill=\"#3aa0d0\"/></g>",
+    "B": "<g id=\"viseme-B\"><rect x=\"152\" y=\"286\" width=\"96\" height=\"8\" rx=\"4\" fill=\"#46b5e5\"/><rect x=\"160\" y=\"288\" width=\"80\" height=\"4\" rx=\"2\" fill=\"#7fdcff\" opacity=\"0.6\"/></g>",
+    "C": "<g id=\"viseme-C\"><circle cx=\"200\" cy=\"290\" r=\"14\" fill=\"#3a342c\" stroke=\"#46b5e5\" stroke-width=\"3\"/><circle cx=\"200\" cy=\"290\" r=\"5\" fill=\"#7fdcff\"/></g>",
+    "D": "<g id=\"viseme-D\"><rect x=\"148\" y=\"282\" width=\"104\" height=\"16\" rx=\"6\" fill=\"#3a342c\" stroke=\"#46b5e5\" stroke-width=\"2\"/><rect x=\"154\" y=\"286\" width=\"92\" height=\"8\" rx=\"3\" fill=\"#7fdcff\" opacity=\"0.55\"/></g>",
+    "E": "<g id=\"viseme-E\"><rect x=\"160\" y=\"281\" width=\"80\" height=\"4\" rx=\"2\" fill=\"#46b5e5\"/><rect x=\"160\" y=\"294\" width=\"80\" height=\"4\" rx=\"2\" fill=\"#46b5e5\"/></g>",
+    "F": "<g id=\"viseme-F\"><rect x=\"156\" y=\"284\" width=\"88\" height=\"10\" rx=\"4\" fill=\"#3a342c\" stroke=\"#46b5e5\" stroke-width=\"2\"/><line x1=\"168\" y1=\"281\" x2=\"232\" y2=\"281\" stroke=\"#7fdcff\" stroke-width=\"1.5\" stroke-dasharray=\"3 4\" opacity=\"0.7\"/></g>",
+    "X": "<g id=\"viseme-X\"><line x1=\"160\" y1=\"290\" x2=\"240\" y2=\"290\" stroke=\"#5d5244\" stroke-width=\"3\" stroke-linecap=\"round\"/></g>"
+  },
+  "captions": {
+    "font_family": "Inter, system-ui, sans-serif",
+    "font_size_px": 16,
+    "color": "#ffffff",
+    "background": "rgba(0,0,0,0.55)",
+    "align": "center",
+    "bottom_offset_px": 24
+  }
+}

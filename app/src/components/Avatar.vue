@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watchEffect } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch, watchEffect } from 'vue';
 
 import StateRing from './StateRing.vue';
 import VisemeMouth from './VisemeMouth.vue';
@@ -136,6 +136,18 @@ onMounted(() => {
     void theme.load(settings.settings.avatar.theme);
   }
 });
+
+// Live-swap the active theme whenever the user picks a new one in Settings.
+// Without this, settings.avatar.theme updates on disk + in the store but
+// the avatar window keeps showing the old SVG until restart.
+watch(
+  () => settings.settings.avatar.theme,
+  (next, prev) => {
+    if (!next || next === prev) return;
+    if (theme.loaded?.manifest.id === next) return;
+    void theme.load(next);
+  },
+);
 
 onBeforeUnmount(() => {
   detachMouse?.();

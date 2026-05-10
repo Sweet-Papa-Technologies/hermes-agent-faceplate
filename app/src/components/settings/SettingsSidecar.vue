@@ -38,36 +38,27 @@
     <q-card flat bordered class="card">
       <q-card-section class="row q-col-gutter-md">
         <q-select
-          v-model="ttsModel"
-          :options="ttsModelOptions"
-          class="col-6"
-          label="Model"
-          filled
-          stack-label
-          use-input
-          new-value-mode="add-unique"
-          :loading="loadingDiscovery"
-          emit-value
-          map-options
-        />
-        <q-select
           v-model="ttsVoice"
           :options="voiceOptions"
-          class="col-6"
+          class="col-12"
           label="Voice"
-          filled
           stack-label
+          filled
           use-input
           new-value-mode="add-unique"
           :loading="loadingDiscovery"
           emit-value
           map-options
+          hint="Picks a Piper voice from the catalog below. Selecting a voice that isn't installed will fall back to the bundled Amy."
         />
         <div class="col-12">
           <div>Rate ({{ ttsRate.toFixed(2) }}x)</div>
           <q-slider v-model="ttsRate" :min="0.5" :max="2.0" :step="0.05" />
         </div>
-        <q-select v-model="ttsFormat" :options="formatOptions" label="Stream format (MSE)" filled stack-label class="col-12" emit-value map-options />
+        <q-expansion-item icon="tune" label="Advanced" class="col-12" header-class="text-grey-7" dense>
+          <q-select v-model="ttsModel" :options="ttsModelOptions" label="Model id" filled stack-label use-input new-value-mode="add-unique" :loading="loadingDiscovery" emit-value map-options class="q-mt-sm" hint="Auto-derived from the voice (piper:&lt;voice&gt;). Override only if you've added a custom backend (e.g. kokoro:…)." />
+          <q-select v-model="ttsFormat" :options="formatOptions" label="Stream format (MSE)" filled stack-label emit-value map-options class="q-mt-sm" />
+        </q-expansion-item>
       </q-card-section>
       <q-card-actions>
         <TestConnectionButton target="tts" label="Test TTS" />
@@ -161,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 
 import { useSetting } from '../../composables/use-setting';
@@ -174,6 +165,51 @@ const token = useSetting('speech.sidecar_token');
 const image = useSetting('speech.sidecar_image');
 const ttsModel = useSetting('speech.tts.model');
 const ttsVoice = useSetting('speech.tts.voice');
+
+// Auto-derive model id from the voice id. The model is just a backend tag —
+// for Piper it's always `piper:<voice>`. Users almost never need to change
+// it; the Advanced section still lets them if they're swapping backends.
+watch(ttsVoice, (next, prev) => {
+  if (!next) return;
+  const expected = `piper:${next}`;
+  if (ttsModel.value !== expected && (!ttsModel.value || ttsModel.value.startsWith('piper:'))) {
+    ttsModel.value = expected;
+  }
+  // Warm up the new voice in the sidecar so the first real synthesize call
+  // doesn't pay the ONNX cold-load cost (5–10 s for medium-quality Piper
+  // voices). Tiny silent input, fire-and-forget. Skipped on first run
+  // (prev === undefined) and when toggling to the same value.
+  if (prev !== undefined && prev !== next) {
+    void warmUpVoice(next);
+  }
+});
+
+async function warmUpVoice(voice: string): Promise<void> {
+  const t0 = performance.now();
+  console.log(`[settings.sidecar] warmUpVoice("${voice}") POST /v1/audio/speech (loads ONNX into RAM)…`);
+  const baseUrl = `${url.value.replace(/\/+$/, '')}/v1`;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (token.value) headers.authorization = `Bearer ${token.value}`;
+  try {
+    const res = await fetch(`${baseUrl}/audio/speech`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        input: '.',
+        voice,
+        model: `piper:${voice}`,
+        response_format: 'mp3',
+        stream: false,
+      }),
+    });
+    // Drain the body so the connection isn't left dangling — without this
+    // Chrome holds the socket and a subsequent real synth can stall behind it.
+    await res.arrayBuffer().catch(() => null);
+    console.log(`[settings.sidecar] warmUpVoice("${voice}") done in ${Math.round(performance.now() - t0)}ms`);
+  } catch (err) {
+    console.warn('[settings.sidecar] voice warm-up failed (non-fatal):', err);
+  }
+}
 const ttsRate = useSetting('speech.tts.rate');
 const ttsFormat = useSetting('speech.tts.format');
 const asrModel = useSetting('speech.asr.model');

@@ -111,7 +111,7 @@ export const HotkeysSettings = z.object({
 });
 
 export const AvatarSettings = z.object({
-  theme: z.string().default('default-svg'),
+  theme: z.string().default('robo'),
   scale: z.number().positive().default(1.0),
   // Addendum #2 + #5: single switch covers Wayland fallback and Windows
   // transparency-quirk escape hatch.

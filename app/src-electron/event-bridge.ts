@@ -12,7 +12,15 @@ import { IPC } from './preload-api';
 import type { FaceplateEvent, FaceplateEventType } from '../src/hermes/event-schema';
 
 const CROSS_WINDOW_BLOCKLIST: ReadonlySet<FaceplateEventType> = new Set<FaceplateEventType>([
+  // High-frequency lip-sync envelopes — useful only in the avatar renderer.
   'tts.audio.envelope',
+  // User input events drive runTurn(); they must fire in EXACTLY ONE
+  // renderer (the avatar). Relaying them to Settings/Wizard windows
+  // produces duplicate LLM calls and two TTS streams when those windows
+  // happen to have turn-handler attached. The route gate in boot/audio.ts
+  // is the primary defence; this blocklist is the second.
+  'user.input.text',
+  'user.input.voice',
 ]);
 
 export function registerEventBridgeIpc(): void {

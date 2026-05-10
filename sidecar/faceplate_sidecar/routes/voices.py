@@ -62,8 +62,24 @@ def _parse_voice_id(voice: str) -> tuple[str, str, str, str]:
 @router.get("/voices", dependencies=[Depends(require_bearer)])
 @router.get("/v1/voices", dependencies=[Depends(require_bearer)])
 def list_voices() -> dict[str, list[dict[str, Any]]]:
+    """Return every voice the sidecar can serve right now.
+
+    Two sources, deduped by `voice` (filename stem):
+
+      1. `cfg.tts_models` from config.yaml — explicit registrations.
+      2. Any `*.onnx` in /voices/ that has a matching `.onnx.json`.
+         Without this, voices the user installs at runtime via
+         POST /v1/voices/download never appear in the Settings dropdown.
+
+    Voices whose registered `voice_path` doesn't actually exist are still
+    returned with `exists: false` so the UI can flag them, but they're
+    pushed to the bottom of the list.
+    """
     cfg = get_config()
+    seen_stems: set[str] = set()
     voices: list[dict[str, Any]] = []
+
+    # 1) Registered models — preserve order from config.yaml.
     for m in cfg.tts_models:
         if not m.voice_path:
             continue
@@ -77,6 +93,29 @@ def list_voices() -> dict[str, list[dict[str, Any]]]:
                 "exists": path.exists(),
             }
         )
+        seen_stems.add(path.stem)
+
+    # 2) Auto-discovered installs — anything in /voices/ not already covered.
+    if VOICES_DIR.exists():
+        for onnx in sorted(VOICES_DIR.glob("*.onnx")):
+            if onnx.stem in seen_stems:
+                continue
+            cfg_json = onnx.with_suffix(onnx.suffix + ".json")
+            if not cfg_json.exists():
+                continue
+            voices.append(
+                {
+                    "id": f"piper:{onnx.stem}",
+                    "voice": onnx.stem,
+                    "backend": "piper-onnx",
+                    "device": "cpu",
+                    "exists": True,
+                }
+            )
+            seen_stems.add(onnx.stem)
+
+    # Sort: existing files first, then anything broken so it's visible last.
+    voices.sort(key=lambda v: (not v["exists"], v["voice"]))
     return {"data": voices}
 
 
@@ -146,10 +185,25 @@ async def download_voice(req: DownloadRequest) -> dict[str, Any]:
 
 @router.get("/v1/models", dependencies=[Depends(require_bearer)])
 def list_models() -> dict[str, Any]:
+    """OpenAI-shaped /v1/models. Same auto-discover logic as /v1/voices so
+    the Settings dropdown picks up runtime-installed voices."""
     cfg = get_config()
     items: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     for m in cfg.tts_models:
         items.append({"id": m.name, "object": "model", "owned_by": "faceplate", "kind": "tts"})
+        seen_ids.add(m.name)
     for m in cfg.asr_models:
         items.append({"id": m.name, "object": "model", "owned_by": "faceplate", "kind": "asr"})
+        seen_ids.add(m.name)
+    if VOICES_DIR.exists():
+        for onnx in sorted(VOICES_DIR.glob("*.onnx")):
+            cfg_json = onnx.with_suffix(onnx.suffix + ".json")
+            if not cfg_json.exists():
+                continue
+            mid = f"piper:{onnx.stem}"
+            if mid in seen_ids:
+                continue
+            items.append({"id": mid, "object": "model", "owned_by": "faceplate", "kind": "tts"})
+            seen_ids.add(mid)
     return {"object": "list", "data": items}

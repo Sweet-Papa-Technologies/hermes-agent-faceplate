@@ -37,6 +37,8 @@ let attached = false;
 let detach: (() => void) | null = null;
 
 let lastSessionId: string | null = null;
+let turnCount = 0;
+let speakCount = 0;
 
 export function attachTurnHandler(): void {
   if (attached) return;
@@ -95,6 +97,8 @@ export function interrupt(reason: string): void {
 }
 
 async function runTurn(userText: string): Promise<void> {
+  const id = ++turnCount;
+  console.log(`[turn] runTurn #${id} START len=${userText.length} active=${active ? 'yes(barge-in)' : 'no'} text="${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
   if (active) interrupt('barge-in');
 
   const settings = useSettingsStore();
@@ -143,6 +147,13 @@ async function runTurn(userText: string): Promise<void> {
     return;
   }
 
+  // Critical guard: if a barge-in (`interrupt('barge-in')` from a newer
+  // turn) replaced us while we were awaiting consumeRuns/consumeChat, drop
+  // out before we paraphrase, emit, or — most importantly — start a TTS
+  // stream. Without this, two concurrent runTurns both call speakAndAnimate
+  // and the user hears two voices talking over each other.
+  if (active !== handle) return;
+
   // Paraphrase pass — defer to main process which holds the LLM api key.
   let spokenText = assistantText;
   let paraphraseText: string | undefined;
@@ -155,6 +166,10 @@ async function runTurn(userText: string): Promise<void> {
   } catch (err) {
     console.warn('[turn] paraphrase failed (non-fatal):', err);
   }
+
+  // Same guard after the paraphrase await — barge-in may have happened
+  // while we were waiting on litert-lm.
+  if (active !== handle) return;
 
   eventBus.emit({
     type: 'agent.response',
@@ -286,6 +301,13 @@ async function speakAndAnimate(
   text: string,
   settings: ReturnType<typeof useSettingsStore>,
 ): Promise<void> {
+  // Last-line defence against the "two voices talking over each other" bug.
+  // The caller checks `active === handle` before calling us, but a sync
+  // re-entry (another `runTurn` firing in the same task before this one
+  // gets to its first await) could slip past. Drop out without touching
+  // the audio graph if our handle has been retired.
+  if (active !== handle || handle.abort.signal.aborted) return;
+
   const agent = useAgentStore();
   const convo = useConversationStore();
   agent.transition('speaking', 'tts.start');
@@ -299,6 +321,8 @@ async function speakAndAnimate(
 
   const ttsBaseUrl = `${speech.sidecar_url.replace(/\/$/, '')}/v1`;
 
+  const sid = ++speakCount;
+  console.log(`[turn] speakStream #${sid} START voice="${speech.tts.voice}" model="${speech.tts.model}" len=${text.length} active===handle? ${active === handle}`);
   let speak: SpeakHandle;
   try {
     speak = speakStream({

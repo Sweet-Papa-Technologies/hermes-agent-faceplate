@@ -17,10 +17,22 @@ import { startWakeClient, stopWakeClient } from '../audio/wake-client';
 import { attachTurnHandler, interrupt as interruptTurn } from '../hermes/turn-handler';
 
 export default boot(({ router }) => {
-  // Only run on the avatar / test windows; other windows can route through
-  // the event bus but don't need their own pipeline.
-  const path = router.currentRoute.value.path;
-  if (path === '/settings' || path === '/wizard') return;
+  // Audio pipeline must initialise in EXACTLY one renderer — the overlay /
+  // test-mode window. Any other window (Settings, Wizard) that runs
+  // turn-handler will fire a duplicate runTurn on every cross-window
+  // user.input.text broadcast, producing two LLM calls and two TTS streams.
+  //
+  // Use a positive `/overlay` (or `/test`) match instead of an exclusion
+  // list. At quasar boot time `router.currentRoute.value.path` may not yet
+  // reflect the URL hash on Electron's file:// loads (the router is set up
+  // synchronously but resolves the hash on the first navigation tick), so
+  // we ALSO consult window.location.hash as a belt-and-suspenders check.
+  const routerPath = router.currentRoute.value.path;
+  const hashPath = (window.location.hash || '').replace(/^#/, '').split('?')[0] || '/';
+  const path = routerPath === '/' ? hashPath : routerPath;
+  const isAudioRenderer = path === '/overlay' || path === '/test';
+  console.log(`[audio.boot] routerPath="${routerPath}" hashPath="${hashPath}" → audio renderer? ${isAudioRenderer}`);
+  if (!isAudioRenderer) return;
 
   attachTurnHandler();
   attachPttController();

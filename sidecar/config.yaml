@@ -30,9 +30,9 @@ tts:
     - name: "piper:en_US-amy-medium"
       backend: "piper-onnx"
       voice_path: "/voices/en_US-amy-medium.onnx"
-    - name: "piper:en_US-libritts-r-medium"
+    - name: "piper:en_US-libritts_r-medium"
       backend: "piper-onnx"
-      voice_path: "/voices/en_US-libritts-r-medium.onnx"
+      voice_path: "/voices/en_US-libritts_r-medium.onnx"
 
 wake:
   enabled: false
