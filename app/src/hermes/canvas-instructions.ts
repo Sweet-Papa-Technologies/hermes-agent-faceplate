@@ -25,35 +25,40 @@ const EAGERNESS_PREAMBLE: Record<ArtifactsSettings['eagerness'], string> = {
 };
 
 const BASE = `OUTPUT PROTOCOL — CRITICAL.
-This response renders in the HermesAgent Faceplate desktop app, which has a built-in canvas window with native renderers for Chart.js, Mermaid, syntax-highlighted code, images, video, audio, and HTML/SVG previews.
+This response renders in the HermesAgent Faceplate desktop app, which has a built-in canvas window with native renderers for Chart.js, Mermaid, syntax-highlighted code, images, video, audio (incl. YouTube/Vimeo/Spotify/SoundCloud iframes), and HTML/SVG previews.
 
-When you want to show the user a chart, diagram, code, image, or rich text, wrap a DECLARATIVE SPEC inside an <artifact> tag. The Faceplate renders it natively.
+CONVERSATION SCOPE: \`conversation_history\` (when provided) is CONTEXT ONLY for understanding what the user has been discussing. Respond to the LATEST input message only. Do NOT iterate over prior user turns or re-answer them. Do NOT summarize the conversation unless the latest message explicitly asks you to.
+
+When you want to show the user rich content, wrap a DECLARATIVE SPEC inside an <artifact> tag. The Faceplate parses the tag, persists the artifact, and auto-opens the canvas focused on it.
 
 DO NOT:
 - import matplotlib / plotly / pandas (not installed, not needed)
-- call terminal/shell tools to render an image
-- emit ASCII bar charts, box-drawing tables claiming to be "the chart", or markdown bullets describing the chart
-- apologize for missing libraries — you have all you need: the artifact tag
+- emit ASCII bar charts, ASCII art, or markdown bullets pretending to be "the chart"
+- apologize for missing libraries — the artifact tag IS the rendering
+- hallucinate media URLs — for video/image/song, ALWAYS use web_search or browser tools first to get a real URL
 
-INSTEAD, emit the spec directly. The Faceplate parses the tag, persists the artifact, and auto-opens the canvas focused on it. Tag bodies are stripped from TTS so narration goes OUTSIDE the tag.
+INSTEAD, emit the spec directly. Tag bodies are stripped from TTS so narration goes OUTSIDE the tag.
 
 Tag format:
 <artifact type="..." title="..." [lang="..."]>BODY</artifact>
 
+Types: chart (Chart.js JSON), diagram (Mermaid), code (any lang), text (markdown), image (URL), video (URL — YouTube/Vimeo/Twitch/Dailymotion auto-embed), audio (URL — Spotify/SoundCloud/Apple Music auto-embed), visual.
+
 Examples:
-<artifact type="chart" title="Cats vs Dogs">{"type":"bar","data":{"labels":["Cats","Dogs"],"datasets":[{"label":"Cuteness","data":[10,10]}]}}</artifact>
+<artifact type="chart" title="Sales">{"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"$","data":[12,19]}]}}</artifact>
 <artifact type="diagram" title="Login flow">sequenceDiagram
-  User->>App: open
-  App->>Auth: redirect</artifact>
-<artifact type="code" lang="python" title="Fib">def fib(n):
-    a,b=0,1
-    for _ in range(n): a,b=b,a+b
-    return a</artifact>
+  User->>App: open</artifact>
+<artifact type="video" title="Funny Cat">https://www.youtube.com/watch?v=dQw4w9WgXcQ</artifact>
+<artifact type="audio" title="Song">https://open.spotify.com/track/...</artifact>
 <artifact type="image" title="Logo">https://example.com/logo.png</artifact>
 
-Types: chart (Chart.js JSON), diagram (Mermaid), code (any lang), text (markdown), image / video / audio / visual (URL or data:URI).
+MEDIA QUERIES — when the user asks for a video / song / images / etc.:
+1. Use web_search (or browser_navigate + browser_get_images for images) to find REAL URLs.
+2. Emit each result as its own artifact tag — the canvas lets the user nav between them with prev/next.
+3. For an inline gallery (e.g. "show 4 cat videos side by side"), use <artifact type="code" lang="html"> with multiple <iframe> embeds — the HTML preview tab loads them.
+4. NEVER fabricate URLs. If web_search returns nothing useful, say so in the prose.
 
-The faceplate-canvas skill has the full protocol if you need details, but you do NOT need to skill_view it for normal use.`;
+The faceplate-canvas skill has more examples; skill_view it only if you need details.`;
 
 /** Build the system-prompt instructions for the configured eagerness mode. */
 export function buildCanvasInstructions(

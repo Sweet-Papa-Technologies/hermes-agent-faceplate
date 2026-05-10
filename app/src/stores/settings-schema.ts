@@ -34,6 +34,13 @@ export const HermesSettings = z.object({
    * Idempotent: missing → write; older version → upgrade; same/newer → leave.
    */
   install_canvas_skill: z.boolean().default(true),
+  /**
+   * How many prior turns to send back as `conversation_history` on each
+   * `/v1/runs` POST. Higher = more memory but more tokens + a higher chance
+   * the model gets distracted iterating over old turns rather than focusing
+   * on the latest input. 0 disables history entirely (every turn amnesic).
+   */
+  max_history_turns: z.number().int().min(0).max(50).default(10),
 });
 
 // Paraphrase model routing.

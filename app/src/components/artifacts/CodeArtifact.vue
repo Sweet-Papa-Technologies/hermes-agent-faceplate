@@ -8,7 +8,9 @@
       v-if="tab === 'preview' && canPreview"
       class="code-preview"
       :srcdoc="srcdoc"
-      sandbox="allow-scripts"
+      sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox"
+      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+      referrerpolicy="strict-origin-when-cross-origin"
     />
     <pre v-else class="code-source"><code ref="codeEl" :class="`language-${lang}`">{{ artifact.body }}</code></pre>
   </div>

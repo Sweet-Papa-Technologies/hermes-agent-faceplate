@@ -446,7 +446,7 @@ function buildMessages(userText: string): ChatTurn[] {
   // chat path enforces the same output contract as /v1/runs. Append
   // conversation history so this path also has memory across turns.
   const settings = useSettingsStore();
-  const history = buildHistoryFromConvo();
+  const history = buildHistoryFromConvo(settings.settings.hermes.max_history_turns);
   return [
     { role: 'system', content: buildCanvasInstructions(settings.settings.artifacts.eagerness) },
     ...history,
@@ -497,28 +497,34 @@ function chatEndpointFromSettings(
   };
 }
 
-// How many prior turns to send back. Hermes server-side prompt caching
-// kicks in for the prefix, so cost grows roughly with the new tail. 40
-// turns is plenty for the kinds of conversations the Faceplate hosts.
-const MAX_HISTORY_TURNS = 40;
+// Per-turn body cap — keeps a single overlong reply (e.g. an old artifact
+// JSON dump that pre-dated the extraction pass) from eating most of the
+// context budget. Truncated turns get a "[truncated]" suffix so the model
+// knows it's seeing a slice.
+const MAX_HISTORY_CHARS_PER_TURN = 4000;
 
 type HistoryTurn = NonNullable<RunsEndpoint['history']>[number];
 
-function buildHistoryFromConvo(): HistoryTurn[] {
+function buildHistoryFromConvo(maxTurns: number): HistoryTurn[] {
+  if (maxTurns <= 0) return [];
   const convo = useConversationStore();
   const out: HistoryTurn[] = [];
   for (const t of convo.history) {
     if (t.role !== 'user' && t.role !== 'assistant' && t.role !== 'system') continue;
     if (!t.text || !t.text.trim()) continue;
-    out.push({ role: t.role, content: t.text });
+    let content = t.text;
+    if (content.length > MAX_HISTORY_CHARS_PER_TURN) {
+      content = content.slice(0, MAX_HISTORY_CHARS_PER_TURN) + '\n[…truncated]';
+    }
+    out.push({ role: t.role, content });
   }
   // Drop the most recent user turn — turn-handler just finalized it before
   // calling consumeRuns, but Hermes wants it as `input`, not as history.
   if (out.length > 0 && out[out.length - 1]!.role === 'user') {
     out.pop();
   }
-  if (out.length > MAX_HISTORY_TURNS) {
-    return out.slice(-MAX_HISTORY_TURNS);
+  if (out.length > maxTurns) {
+    return out.slice(-maxTurns);
   }
   return out;
 }
@@ -529,7 +535,7 @@ function runsEndpointFromSettings(
   const h = settings.settings.hermes;
   if (!h.base_url) return null;
   const sid = getActiveSessionId();
-  const history = buildHistoryFromConvo();
+  const history = buildHistoryFromConvo(h.max_history_turns);
   return {
     baseUrl: h.base_url.replace(/\/$/, ''),
     ...(h.api_key ? { apiKey: h.api_key } : {}),

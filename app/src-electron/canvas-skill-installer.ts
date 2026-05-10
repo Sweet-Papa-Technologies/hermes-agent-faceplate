@@ -12,7 +12,6 @@
 //   - Setting `hermes.install_canvas_skill` (default true) gates the whole flow.
 //   - If ~/.hermes does not exist yet → no-op (the user hasn't set up Hermes).
 
-import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -24,7 +23,7 @@ const SKILL_FILENAME = 'SKILL.md';
 // Bump this when the skill body materially changes — old installs will be
 // upgraded on next boot. User-edited copies that bump their own version
 // past ours stay untouched.
-const SKILL_VERSION = '1.2.0';
+const SKILL_VERSION = '1.3.0';
 
 function hermesHome(): string {
   if (process.env.HERMES_HOME) return process.env.HERMES_HOME;
@@ -163,6 +162,44 @@ def fib(n):
 <artifact type="image" title="Architecture sketch">https://example.com/diagram.png</artifact>
 \`\`\`
 
+### Video — direct file URL OR YouTube / Vimeo / Twitch / Dailymotion link
+
+The Faceplate's video renderer detects the URL pattern and uses the platform's
+embed endpoint when it's not a directly-streamable file. You don't have to
+remember the embed URL shape — just paste the watch-page URL.
+
+\`\`\`
+<artifact type="video" title="Funny Cat Compilation">https://www.youtube.com/watch?v=dQw4w9WgXcQ</artifact>
+<artifact type="video" title="Talk">https://vimeo.com/76979871</artifact>
+\`\`\`
+
+### Audio — direct file URL OR Spotify / SoundCloud / Apple Music
+
+\`\`\`
+<artifact type="audio" title="Lo-Fi Beats">https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLMfH</artifact>
+<artifact type="audio" title="Mix">https://soundcloud.com/artist/track</artifact>
+\`\`\`
+
+### Multi-media gallery — when the user wants several at once
+
+Wrap an HTML page with multiple iframe embeds in a code artifact with \`lang="html"\` —
+the canvas renders the Preview tab in a sandboxed iframe that allows YouTube, Spotify,
+etc. embeds.
+
+\`\`\`
+<artifact type="code" lang="html" title="Cat Video Gallery">
+<style>body{margin:0;font-family:system-ui;background:#111;color:#eee}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
+  iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:8px}</style>
+<div class="grid">
+  <iframe src="https://www.youtube.com/embed/VIDEO_ID_1" allowfullscreen></iframe>
+  <iframe src="https://www.youtube.com/embed/VIDEO_ID_2" allowfullscreen></iframe>
+  <iframe src="https://www.youtube.com/embed/VIDEO_ID_3" allowfullscreen></iframe>
+  <iframe src="https://www.youtube.com/embed/VIDEO_ID_4" allowfullscreen></iframe>
+</div>
+</artifact>
+\`\`\`
+
 ### Text — markdown that should render in its own viewer (not be spoken)
 
 \`\`\`
@@ -182,6 +219,28 @@ def fib(n):
 - For images / videos / audio, prefer a URL or data:URI in the body. Do not inline raw binary unless using \`mime\` + base64.
 - Always include a \`title\` for chart, diagram, and code artifacts — it labels the canvas window.
 - Tags are stripped from spoken/captioned text. Don't worry about the body confusing TTS.
+
+## Media queries — finding real URLs
+
+When the user asks for a video, song, image, or any other media you'd need to find:
+
+1. **NEVER hallucinate URLs.** A real URL or no URL.
+2. **Use Hermes' web tools** to find them:
+   - \`web_search(query)\` — fast text search; returns titles + URLs
+   - \`browser_navigate\` + \`browser_get_images\` — when you need images from a specific page
+   - \`browser_vision\` — when text search isn't enough and you need to "see" the page
+3. **Emit each result as its own artifact tag.** The canvas window already has prev/next nav so the user can step through multiple results.
+4. **Multi-item galleries** (e.g. "show me 4 cat videos at once"): use the HTML gallery pattern from the Multi-media gallery section above.
+5. **YouTube short-form / playlist URLs are fine** — the renderer handles \`youtube.com/watch?v=\`, \`youtu.be/\`, \`youtube.com/shorts/\`, and \`youtube.com/playlist?list=\`.
+
+Examples of media query handling:
+
+| User asks | Workflow |
+|---|---|
+| "show me a funny cat video" | \`web_search("funny cat video site:youtube.com")\` → pick best result → \`<artifact type="video" title="...">URL</artifact>\` |
+| "play some lo-fi" | \`web_search("lo-fi beats spotify playlist")\` → \`<artifact type="audio" title="Lo-Fi">spotify URL</artifact>\` |
+| "show me pictures of red pandas" | \`web_search("red panda images")\` → multiple \`<artifact type="image">URL</artifact>\` tags (one per image, nav-able) |
+| "find a tutorial video about CSS grid" | \`web_search("CSS grid tutorial youtube")\` → \`<artifact type="video">URL</artifact>\` |
 
 ## What NOT to do
 
