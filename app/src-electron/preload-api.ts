@@ -170,6 +170,13 @@ export interface FaceplatePreload {
     showHide(state?: ShowHideState): Promise<void>;
     setMode(mode: 'overlay' | 'windowed'): Promise<void>;
     moveBy(dx: number, dy: number): Promise<void>;
+    openSettings(): Promise<void>;
+    quit(): Promise<void>;
+    /** Step the avatar window's width by ± deltaW pixels; height scales
+     * proportionally so avatar:captions ratio stays constant. Clamped. */
+    resizeBy(deltaW: number): Promise<void>;
+    /** Reset the avatar window to its default size. */
+    resetSize(): Promise<void>;
   };
   hotkeys: {
     register(name: HotkeyName, accelerator: string): Promise<RegisterResult>;
@@ -296,6 +303,10 @@ export const IPC = {
     showHide: 'faceplate:window:show-hide',
     setMode: 'faceplate:window:set-mode',
     moveBy: 'faceplate:window:move-by',
+    openSettings: 'faceplate:window:open-settings',
+    quit: 'faceplate:window:quit',
+    resizeBy: 'faceplate:window:resize-by',
+    resetSize: 'faceplate:window:reset-size',
   },
   hotkeys: {
     register: 'faceplate:hotkeys:register',

@@ -17,8 +17,9 @@
       <VisemeMouth />
       <!-- Theme-specific FX layer. The Robo theme uses this to overlay
            animated state-tinted eye glow + a live audio waveform inside
-           the mouth bezel. Other themes have no overlay. -->
+           the mouth bezel. Bunny does state-tinted blush + sparkle. -->
       <RoboFx v-if="manifest?.id === 'robo'" />
+      <BunnyFx v-else-if="manifest?.id === 'bunny'" />
       <!--
         Hardcoded mic-active LED — not theme-overridable per design §12.1.
         Visible whenever the renderer holds a live MediaStream from the mic.
@@ -31,6 +32,11 @@
     <div v-else class="avatar-loading">
       {{ theme.loadError ?? 'Loading avatar…' }}
     </div>
+
+    <!-- Hover-revealed window controls (close + menu). Mounted as a sibling
+         of the SVG so it overlays the avatar without being part of the SVG
+         coordinate system. -->
+    <AvatarHud v-if="settings.settings.avatar.mode === 'overlay'" />
   </div>
 </template>
 
@@ -40,6 +46,8 @@ import { computed, onMounted, onBeforeUnmount, ref, watch, watchEffect } from 'v
 import StateRing from './StateRing.vue';
 import VisemeMouth from './VisemeMouth.vue';
 import RoboFx from './RoboFx.vue';
+import BunnyFx from './BunnyFx.vue';
+import AvatarHud from './AvatarHud.vue';
 import { useThemeStore } from '../stores/theme';
 import { useSettingsStore } from '../stores/settings';
 import { useAgentStore } from '../stores/agent';
@@ -192,10 +200,12 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .avatar-root {
-  /* Sized by the SVG it contains, NOT the full window. The overlay page
-   * uses a vertical flex stack: avatar shrinks to its content so the
-   * tool-badge + captions flow below without reserving dead space. */
+  /* Square slot the size of the window's width. Captions / tool badge /
+   * activity stack take whatever vertical space is left in the fixed-
+   * height window. The menu's +/−/Reset buttons resize width AND height
+   * proportionally so this ratio stays constant. */
   width: 100%;
+  aspect-ratio: 1 / 1;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -203,6 +213,8 @@ onBeforeUnmount(() => {
   justify-content: flex-start;
   background: var(--faceplate-bg, transparent);
   filter: var(--faceplate-card, none);
+  /* Anchor for the HUD's absolute-positioned buttons. */
+  position: relative;
 }
 
 :root[data-mode='windowed'] .avatar-root {
@@ -210,10 +222,13 @@ onBeforeUnmount(() => {
 }
 
 .avatar-svg {
+  /* Fills the avatar-root flex slot; aspect ratio is preserved by the
+   * SVG's own preserveAspectRatio="xMidYMid meet". */
   width: 100%;
   height: 100%;
-  max-width: 320px;
-  max-height: 320px;
+  max-width: 100%;
+  max-height: 100%;
+  flex: 1 1 auto;
   transform: scale(v-bind(scale));
   transform-origin: center;
   transition: transform 200ms ease;

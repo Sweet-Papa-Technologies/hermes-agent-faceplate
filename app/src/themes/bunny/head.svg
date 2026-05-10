@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <!-- Soft cream body gradient -->
+    <radialGradient id="bunnyBodyGrad" cx="50%" cy="50%" r="50%" fx="50%" fy="40%">
+      <stop offset="0%" stop-color="#FFF9F0" />
+      <stop offset="70%" stop-color="#F7EFE2" />
+      <stop offset="100%" stop-color="#E8DCC8" />
+    </radialGradient>
+    <!-- Soft default-pink blush; BunnyFx overlays a state-tinted version on top. -->
+    <radialGradient id="bunnyBlushGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFB6C1" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#FFB6C1" stop-opacity="0" />
+    </radialGradient>
+    <!-- Eye depth -->
+    <radialGradient id="bunnyEyeGrad" cx="40%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#5D4037" />
+      <stop offset="100%" stop-color="#3E2723" />
+    </radialGradient>
+  </defs>
+
+  <g id="head">
+    <!-- Left ear (perky) -->
+    <g class="bunny-ear bunny-ear-left">
+      <path d="M 120 120 Q 90 20 160 50 Q 180 80 180 150" fill="#F7EFE2" stroke="#E8DCC8" stroke-width="2" />
+      <path d="M 130 110 Q 110 40 150 60 Q 165 85 165 140" fill="#FFEBEE" opacity="0.5" />
+    </g>
+
+    <!-- Right ear (folded — gives the bunny character) -->
+    <g class="bunny-ear bunny-ear-right">
+      <path d="M 280 100 Q 360 60 380 150 Q 350 180 300 140" fill="#F7EFE2" stroke="#E8DCC8" stroke-width="2" />
+      <path d="M 295 110 Q 340 85 355 140 Q 330 155 305 130" fill="#FFEBEE" opacity="0.5" />
+    </g>
+
+    <!-- Main face / body -->
+    <circle cx="200" cy="220" r="150" fill="url(#bunnyBodyGrad)" stroke="#E8DCC8" stroke-width="1" />
+
+    <!-- Static pink blushes — BunnyFx layers a state-tinted glow on top
+         to keep the bunny pink at rest but warm/cool with mood. -->
+    <circle class="bunny-blush bunny-blush-left" cx="110" cy="260" r="40" fill="url(#bunnyBlushGrad)" />
+    <circle class="bunny-blush bunny-blush-right" cx="290" cy="260" r="40" fill="url(#bunnyBlushGrad)" />
+
+    <!-- Eyes (large + sparkly). White pupil dots stay alive at rest;
+         BunnyFx adds a subtle state-colored ring around them when active. -->
+    <g id="bunny-eyes">
+      <circle cx="140" cy="235" r="32" fill="url(#bunnyEyeGrad)" />
+      <circle cx="130" cy="220" r="8" fill="#FFFFFF" />
+      <circle cx="150" cy="245" r="4" fill="#FFFFFF" opacity="0.6" />
+
+      <circle cx="260" cy="235" r="32" fill="url(#bunnyEyeGrad)" />
+      <circle cx="250" cy="220" r="8" fill="#FFFFFF" />
+      <circle cx="270" cy="245" r="4" fill="#FFFFFF" opacity="0.6" />
+    </g>
+
+    <!-- Nose: subtle pink Y-shape -->
+    <path d="M 190 255 Q 200 250 210 255" fill="none" stroke="#D81B60" stroke-width="3" stroke-linecap="round" opacity="0.4" />
+    <path d="M 200 255 L 200 275" fill="none" stroke="#5D4037" stroke-width="1.5" opacity="0.3" />
+
+    <!-- Mouth area is intentionally empty — VisemeMouth paints there each
+         frame. The "X" (silent) viseme is a smile arc that matches the
+         bunny example's resting expression. -->
+  </g>
+</svg>

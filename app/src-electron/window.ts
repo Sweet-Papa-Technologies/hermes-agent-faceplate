@@ -21,9 +21,11 @@ const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
 const OVERLAY_W = 320;
 // Window is taller than the avatar so captions, the tool-call badge, and
-// any other below-avatar UI render BELOW the face plate instead of over
-// it. The avatar SVG itself stays max 320x320 and is pinned to the top
-// of the window via `.avatar-root` flex alignment.
+// the activity indicator render BELOW the face plate. The avatar slot
+// sizes itself square via `aspect-ratio: 1 / 1` on `.avatar-root`, so the
+// remaining vertical space (default ~200px) is the captions area. The
+// menu's +/− / Reset buttons resize WIDTH and HEIGHT proportionally so
+// this ratio stays constant.
 const OVERLAY_H = 520;
 
 let avatarWindow: BrowserWindow | null = null;
@@ -81,12 +83,17 @@ function createOverlayWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: OVERLAY_W,
     height: OVERLAY_H,
+    minWidth: 200,
+    minHeight: 240,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
     hasShadow: false,
     skipTaskbar: true,
-    resizable: false,
+    // Resize handles live on the frameless window's invisible chrome edges.
+    // The Avatar SVG fills 100% of its flex slot, so it scales smoothly as
+    // the user drags any corner.
+    resizable: true,
     movable: true,
     backgroundColor: '#00000000',
     icon: path.resolve(currentDir, 'icons/icon.png'),
@@ -181,6 +188,37 @@ export function recreateAvatarWindow(): BrowserWindow {
     avatarWindow = null;
   }
   return createAvatarWindow();
+}
+
+// ─── menu-driven size controls ──────────────────────────────────────────
+//
+// The window is a fixed default size (OVERLAY_W × OVERLAY_H). Width AND
+// height grow/shrink TOGETHER so the avatar:captions ratio stays constant
+// — the avatar slot uses `aspect-ratio: 1 / 1` and tracks the window's
+// width, with captions filling the rest. Resize via the menu's +/−/Reset
+// buttons (more discoverable than hunting for invisible drag edges on a
+// transparent always-on-top window). Corner-drag still works as a fallback.
+
+const OVERLAY_W_MIN = 200;
+const OVERLAY_W_MAX = 900;
+
+export function resizeAvatarBy(deltaW: number): void {
+  if (!avatarWindow || avatarWindow.isDestroyed()) return;
+  const bounds = avatarWindow.getBounds();
+  const nextW = Math.max(OVERLAY_W_MIN, Math.min(OVERLAY_W_MAX, bounds.width + deltaW));
+  if (nextW === bounds.width) return;
+  // Scale height in lockstep with the current width:height ratio so the
+  // avatar slot and captions area both grow proportionally — otherwise a
+  // wider window gets a giant avatar and a sliver of captions space.
+  const ratio = bounds.height / Math.max(bounds.width, 1);
+  const nextH = Math.round(nextW * ratio);
+  avatarWindow.setBounds({ ...bounds, width: nextW, height: nextH });
+}
+
+export function resetAvatarSize(): void {
+  if (!avatarWindow || avatarWindow.isDestroyed()) return;
+  const bounds = avatarWindow.getBounds();
+  avatarWindow.setBounds({ ...bounds, width: OVERLAY_W, height: OVERLAY_H });
 }
 
 export function showHide(state?: 'show' | 'hide' | 'toggle'): void {
@@ -418,6 +456,21 @@ export function registerWindowIpc(): void {
       width: bounds.width,
       height: bounds.height,
     });
+  });
+
+  ipcMain.handle(IPC.window.openSettings, () => {
+    createSettingsWindow();
+  });
+  ipcMain.handle(IPC.window.quit, () => {
+    quitAll();
+  });
+
+  ipcMain.handle(IPC.window.resizeBy, (_evt: IpcMainInvokeEvent, deltaW: number) => {
+    resizeAvatarBy(deltaW);
+  });
+
+  ipcMain.handle(IPC.window.resetSize, () => {
+    resetAvatarSize();
   });
 
   ipcMain.on(IPC.typingBar.submit, (_evt, text: string) => {

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <!-- State ring: soft circular halo around the bunny body. The `racer`
+       sub-element travels around the perimeter when the agent is thinking.
+       Three layers stack so the dashed outline + faint outer border give
+       depth without competing with the bunny's pastel palette. -->
+  <g id="state-ring">
+    <circle class="state-ring-racer"
+            cx="200" cy="220" r="180"
+            fill="none" stroke="currentColor" stroke-width="6"
+            stroke-linecap="round"
+            pathLength="100" stroke-dasharray="18 82"
+            stroke-dashoffset="0" />
+    <circle cx="200" cy="220" r="180"
+            fill="none" stroke="currentColor" stroke-width="4"
+            stroke-linecap="round" stroke-dasharray="6 8" opacity="0.5" />
+    <circle cx="200" cy="220" r="186"
+            fill="none" stroke="currentColor" stroke-width="2" opacity="0.25" />
+  </g>
+</svg>

@@ -24,6 +24,25 @@
           title="Next (→)"
           @click="next"
         >›</button>
+        <span class="canvas-titlebar-sep" aria-hidden="true">·</span>
+        <button
+          class="canvas-titlebar-btn"
+          :disabled="!canZoomOut"
+          title="Zoom out (⌘−)"
+          @click="zoomOut"
+        >−</button>
+        <button
+          class="canvas-titlebar-btn canvas-titlebar-zoom"
+          title="Reset zoom (⌘0)"
+          @click="resetZoom"
+        >{{ Math.round(zoom * 100) }}%</button>
+        <button
+          class="canvas-titlebar-btn"
+          :disabled="!canZoomIn"
+          title="Zoom in (⌘+)"
+          @click="zoomIn"
+        >+</button>
+        <span class="canvas-titlebar-sep" aria-hidden="true">·</span>
         <button
           class="canvas-titlebar-btn"
           title="Download"
@@ -37,10 +56,18 @@
         >×</button>
       </header>
       <div class="canvas-body">
-        <ArtifactRenderer
+        <!-- The zoom-aware wrapper. Browser-native CSS `zoom` (Chromium-
+             supported) scales everything inside — text, SVGs, charts, and
+             iframes — without needing per-renderer logic. Layout reflows
+             cleanly so scrollbars adjust correctly when an artifact gets
+             bigger than the viewport. -->
+        <div
           v-if="active"
-          :artifact="active"
-        />
+          class="canvas-zoom"
+          :style="{ zoom: zoom }"
+        >
+          <ArtifactRenderer :artifact="active" />
+        </div>
         <div v-else class="canvas-empty">
           No artifacts yet. When the assistant produces visual content,
           it'll show up here automatically.
@@ -51,13 +78,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 
 import ArtifactRenderer from '../components/artifacts/ArtifactRenderer.vue';
 import { useArtifactsStore } from '../stores/artifacts';
 import type { ArtifactKind } from '../stores/artifact-types';
 
 const artifacts = useArtifactsStore();
+
+// ─── zoom ─────────────────────────────────────────────────────────────
+//
+// CSS `zoom` (Chromium-supported, used by Electron's webview) scales the
+// artifact's whole subtree — text, SVG charts, mermaid diagrams, iframes,
+// images — without needing per-renderer code. The titlebar shows the
+// percent and offers click controls; ⌘+ / ⌘− / ⌘0 also work.
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4.0;
+const ZOOM_STEP = 0.15;
+
+const zoom = ref<number>(1);
+const canZoomIn  = computed(() => zoom.value < ZOOM_MAX - 0.001);
+const canZoomOut = computed(() => zoom.value > ZOOM_MIN + 0.001);
+
+function clampZoom(v: number): number {
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(v * 100) / 100));
+}
+function zoomIn():    void { zoom.value = clampZoom(zoom.value + ZOOM_STEP); }
+function zoomOut():   void { zoom.value = clampZoom(zoom.value - ZOOM_STEP); }
+function resetZoom(): void { zoom.value = 1; }
 const list = computed(() => artifacts.list);
 const active = computed(() => artifacts.active);
 
@@ -98,7 +146,18 @@ function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') { e.preventDefault(); closeWindow(); return; }
   if (e.key === 'ArrowLeft') { e.preventDefault(); void prev(); return; }
   if (e.key === 'ArrowRight') { e.preventDefault(); void next(); return; }
+  // Zoom shortcuts. Cmd on macOS, Ctrl elsewhere.  `=` covers Cmd+= for
+  // unshifted-plus on US keyboards (which is how most browsers handle it).
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomIn();    return; }
+  if (mod && (e.key === '-' || e.key === '_')) { e.preventDefault(); zoomOut();   return; }
+  if (mod && e.key === '0')                    { e.preventDefault(); resetZoom(); return; }
 }
+
+// Reset zoom when the user navigates to a different artifact — otherwise
+// a 200% zoom on a tall code listing carries over to a small image and
+// looks bizarre.
+watch(() => artifacts.active?.id, () => { resetZoom(); });
 
 let detachFocus: (() => void) | null = null;
 let detachChanged: (() => void) | null = null;
@@ -230,6 +289,26 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
+.canvas-titlebar-sep {
+  color: rgba(255, 255, 255, 0.18);
+  font: 14px/1 system-ui, sans-serif;
+  user-select: none;
+  margin: 0 2px;
+}
+
+/* Zoom-percent button is wider than the icon buttons — it shows a
+ * 3-character label (e.g. "100%") and acts as the "reset to 100%" tap. */
+.canvas-titlebar-zoom {
+  width: auto;
+  min-width: 44px;
+  padding: 0 8px;
+  font: 11px/1 'JetBrains Mono', ui-monospace, monospace;
+  color: rgba(255, 255, 255, 0.78);
+}
+.canvas-titlebar-zoom:hover:not(:disabled) {
+  color: #7fdcff;
+}
+
 .canvas-body {
   flex: 1;
   min-height: 0;
@@ -238,6 +317,18 @@ onBeforeUnmount(() => {
   justify-content: stretch;
   overflow: auto;
   padding: 12px;
+}
+
+/* Zoom wrapper — flexes to fill the body so the artifact has the same
+ * box it had pre-zoom. CSS `zoom` reflows children so scrollbars on the
+ * canvas-body parent kick in once content exceeds the viewport. */
+.canvas-zoom {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  min-width: 0;
+  min-height: 0;
 }
 
 .canvas-empty {

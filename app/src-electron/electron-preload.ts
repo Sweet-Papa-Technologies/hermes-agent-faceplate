@@ -60,6 +60,10 @@ const win: FaceplatePreload['window'] = {
     ipcRenderer.invoke(IPC.window.showHide, state),
   setMode: (mode) => ipcRenderer.invoke(IPC.window.setMode, mode),
   moveBy: (dx, dy) => ipcRenderer.invoke(IPC.window.moveBy, dx, dy),
+  openSettings: () => ipcRenderer.invoke(IPC.window.openSettings),
+  quit: () => ipcRenderer.invoke(IPC.window.quit),
+  resizeBy: (deltaW: number) => ipcRenderer.invoke(IPC.window.resizeBy, deltaW),
+  resetSize: () => ipcRenderer.invoke(IPC.window.resetSize),
 };
 
 const hotkeys: FaceplatePreload['hotkeys'] = {
