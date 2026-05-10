@@ -12,20 +12,31 @@
 #   - Polls /v1/health until 200 (60 s timeout) and prints the API key.
 #
 # Override-able env vars:
-#   HERMES_IMAGE       (default: nousresearch/hermes-agent)
+#   HERMES_BASE_IMAGE  (default: nousresearch/hermes-agent — the upstream base)
+#   HERMES_LOCAL_TAG   (default: hermes-faceplate:browser — what we run)
 #   HERMES_NAME        (default: hermes-personal)
 #   HERMES_PORT        (default: 8642)
 #   HERMES_HOME        (default: $HOME/.hermes)
 #   HERMES_BIND        (default: 127.0.0.1 — host side of the port mapping)
+#   HERMES_SKIP_BUILD  (default: unset; set to "1" to skip the local build
+#                       and run the base image directly — browser tools
+#                       won't work but startup is faster)
 
 set -euo pipefail
 
-HERMES_IMAGE="${HERMES_IMAGE:-nousresearch/hermes-agent}"
+# Two image identifiers:
+#   - BASE: what we pull from the registry (upstream)
+#   - LOCAL_TAG: what we actually run (BASE + browser tooling baked in)
+HERMES_BASE_IMAGE="${HERMES_BASE_IMAGE:-${HERMES_IMAGE:-nousresearch/hermes-agent}}"
+HERMES_LOCAL_TAG="${HERMES_LOCAL_TAG:-hermes-faceplate:browser}"
 HERMES_NAME="${HERMES_NAME:-hermes-personal}"
 HERMES_PORT="${HERMES_PORT:-8642}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_BIND="${HERMES_BIND:-127.0.0.1}"
 ENV_FILE="$HERMES_HOME/.env"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOCKERFILE_DIR="$SCRIPT_DIR/hermes"
 
 # ANSI-C quoting ($'...') puts the actual ESC byte in the variable, so the
 # colors render correctly in both `printf` AND `cat <<HEREDOC` blocks.
@@ -109,9 +120,28 @@ if docker ps -a --format '{{.Names}}' | grep -qx "$HERMES_NAME"; then
   docker rm -f "$HERMES_NAME" >/dev/null
 fi
 
-if ! docker image inspect "$HERMES_IMAGE" >/dev/null 2>&1; then
-  log "Pulling $HERMES_IMAGE (one-time)…"
-  docker pull "$HERMES_IMAGE"
+if ! docker image inspect "$HERMES_BASE_IMAGE" >/dev/null 2>&1; then
+  log "Pulling $HERMES_BASE_IMAGE (one-time)…"
+  docker pull "$HERMES_BASE_IMAGE"
+fi
+
+# Build the local image that bakes in agent-browser + chromium so the
+# `browser_navigate` / `browser_get_images` / etc. tools work out of the
+# box. Cheap when cached — Docker reuses layers unless the base image's
+# digest changed. Skipped if HERMES_SKIP_BUILD=1.
+HERMES_RUN_IMAGE="$HERMES_LOCAL_TAG"
+if [ "${HERMES_SKIP_BUILD:-}" = "1" ]; then
+  warn "HERMES_SKIP_BUILD=1 set — running base image; browser tools won't work."
+  HERMES_RUN_IMAGE="$HERMES_BASE_IMAGE"
+elif [ ! -f "$DOCKERFILE_DIR/Dockerfile" ]; then
+  warn "No Dockerfile at $DOCKERFILE_DIR — running base image; browser tools won't work."
+  HERMES_RUN_IMAGE="$HERMES_BASE_IMAGE"
+else
+  log "Building $HERMES_LOCAL_TAG on top of $HERMES_BASE_IMAGE (browser + agent-browser CLI)…"
+  docker build \
+    --build-arg "HERMES_BASE=$HERMES_BASE_IMAGE" \
+    -t "$HERMES_LOCAL_TAG" \
+    "$DOCKERFILE_DIR" >/dev/null
 fi
 
 log "Starting $HERMES_NAME on $HERMES_BIND:$PORT (mount $HERMES_HOME → /opt/data)…"
@@ -124,7 +154,7 @@ docker run -d \
   --restart unless-stopped \
   -p "$HERMES_BIND:$PORT:$PORT" \
   -v "$HERMES_HOME:/opt/data" \
-  "$HERMES_IMAGE" gateway run >/dev/null
+  "$HERMES_RUN_IMAGE" gateway run >/dev/null
 
 # ─── wait for health ──────────────────────────────────────────────────────
 
@@ -150,7 +180,7 @@ ${GREEN}─── hermes-agent running ───${RESET}
 
   URL:        http://$HERMES_BIND:$PORT/v1
   Container:  $HERMES_NAME
-  Image:      $HERMES_IMAGE
+  Image:      $HERMES_RUN_IMAGE  (base: $HERMES_BASE_IMAGE)
   Env file:   $ENV_FILE
 
   ${YELLOW}API_SERVER_KEY${RESET} (paste this into the Faceplate wizard):
