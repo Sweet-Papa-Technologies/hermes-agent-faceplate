@@ -103,6 +103,21 @@ const platform: FaceplatePreload['platform'] = {
   openDevTools: (target = 'self') => ipcRenderer.invoke(IPC.platform.openDevTools, target),
 };
 
+const typingBar: FaceplatePreload['typingBar'] = {
+  submit: (text: string) => ipcRenderer.send(IPC.typingBar.submit, text),
+  cancel: () => ipcRenderer.send(IPC.typingBar.cancel),
+  onDispatch: (cb) => {
+    const listener = (_e: unknown, text: string) => cb(text);
+    ipcRenderer.on(IPC.typingBar.dispatch, listener);
+    return () => ipcRenderer.removeListener(IPC.typingBar.dispatch, listener);
+  },
+  onOpened: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on(IPC.typingBar.opened, listener);
+    return () => ipcRenderer.removeListener(IPC.typingBar.opened, listener);
+  },
+};
+
 const api: FaceplatePreload = {
   settings,
   hermes,
@@ -113,6 +128,7 @@ const api: FaceplatePreload = {
   themes,
   events,
   platform,
+  typingBar,
 };
 
 contextBridge.exposeInMainWorld('faceplate', api);

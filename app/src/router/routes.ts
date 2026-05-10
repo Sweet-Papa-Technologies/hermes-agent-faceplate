@@ -6,6 +6,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/settings', component: () => import('pages/SettingsPage.vue') },
   { path: '/test', component: () => import('pages/TestModePage.vue') },
   { path: '/wizard', component: () => import('pages/WizardPage.vue') },
+  { path: '/typing', component: () => import('pages/TypingPage.vue') },
   { path: '/:catchAll(.*)*', component: () => import('pages/ErrorNotFound.vue') },
 ];
 

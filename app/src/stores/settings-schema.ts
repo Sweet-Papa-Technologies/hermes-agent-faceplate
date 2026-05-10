@@ -103,7 +103,9 @@ export const HotkeysSettings = z.object({
   // CommandOrControl alias) is unbound by default on macOS, Win, and
   // Linux DEs. Rebindable in Settings → Hotkeys.
   typing_bar: HotkeyAccelerator.default('Control+Space'),
-  push_to_talk: HotkeyAccelerator.default('CommandOrControl+Shift+Space'),
+  // Literal Control on every OS — Cmd+Shift+Space conflicts with macOS
+  // Spotlight's "Search Files Only" variant on some setups.
+  push_to_talk: HotkeyAccelerator.default('Control+Shift+Space'),
   captions: HotkeyAccelerator.default('CommandOrControl+Shift+C'),
   cycle_monitor: HotkeyAccelerator.default('CommandOrControl+Shift+M'),
   replay: HotkeyAccelerator.default('CommandOrControl+Shift+R'),

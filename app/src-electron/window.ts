@@ -265,6 +265,120 @@ export function closeWizardWindow(): void {
   wizardWindow = null;
 }
 
+// ─── typing bar ─────────────────────────────────────────────────────────
+//
+// A dedicated frameless transparent always-on-top window centered on the
+// active display (the one with the user's cursor / focused app, NOT
+// necessarily the one the avatar is on). Spotlight-style. Fires the
+// hotkey → opens here → user types → on submit we forward the text to
+// the avatar window's renderer via direct IPC (cross-window event-bus
+// relay of user.input.* is intentionally blocklisted in event-bridge.ts
+// to avoid the double-TTS bug).
+
+let typingBarWindow: BrowserWindow | null = null;
+
+const TYPING_W = 760;
+const TYPING_H = 140;
+
+function activeDisplay(): Electron.Display {
+  const cursor = screen.getCursorScreenPoint();
+  return screen.getDisplayNearestPoint(cursor);
+}
+
+export function showTypingBarWindow(): void {
+  // Reuse the existing window if it's already open — second hotkey press
+  // when visible should toggle (close it).
+  if (typingBarWindow && !typingBarWindow.isDestroyed()) {
+    if (typingBarWindow.isVisible() && typingBarWindow.isFocused()) {
+      typingBarWindow.hide();
+      return;
+    }
+    repositionTypingBar();
+    typingBarWindow.show();
+    typingBarWindow.focus();
+    typingBarWindow.webContents.send(IPC.typingBar.opened);
+    return;
+  }
+
+  const display = activeDisplay();
+  const { workArea } = display;
+  const x = Math.round(workArea.x + (workArea.width - TYPING_W) / 2);
+  // Slightly above the optical center reads more naturally than dead-centre.
+  const y = Math.round(workArea.y + workArea.height * 0.32 - TYPING_H / 2);
+
+  typingBarWindow = new BrowserWindow({
+    width: TYPING_W,
+    height: TYPING_H,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: true,
+    show: false, // wait for content to be ready, then show + focus
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      preload: preloadPath(),
+    },
+  });
+  // alwaysOnTop above floating panels (system-wide spotlight / mission-control)
+  typingBarWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  if (typingBarWindow.setVisibleOnAllWorkspaces) {
+    typingBarWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+  // Note: previously we hid the window on blur, but that fights with the
+  // drag-to-move flow (drag operations briefly defocus the window on some
+  // window managers, which made it disappear mid-drag). Dismissal is now
+  // explicit: Esc, clicking outside the card, or pressing the hotkey
+  // again to toggle.
+  typingBarWindow.on('closed', () => {
+    typingBarWindow = null;
+  });
+  typingBarWindow.once('ready-to-show', () => {
+    typingBarWindow?.show();
+    typingBarWindow?.focus();
+    typingBarWindow?.webContents.send(IPC.typingBar.opened);
+  });
+  void loadRoute(typingBarWindow, '/typing');
+}
+
+export function hideTypingBarWindow(): void {
+  if (typingBarWindow && !typingBarWindow.isDestroyed() && typingBarWindow.isVisible()) {
+    typingBarWindow.hide();
+  }
+}
+
+function repositionTypingBar(): void {
+  if (!typingBarWindow || typingBarWindow.isDestroyed()) return;
+  const display = activeDisplay();
+  const { workArea } = display;
+  const bounds = typingBarWindow.getBounds();
+  typingBarWindow.setBounds({
+    x: Math.round(workArea.x + (workArea.width - bounds.width) / 2),
+    y: Math.round(workArea.y + workArea.height * 0.32 - bounds.height / 2),
+    width: bounds.width,
+    height: bounds.height,
+  });
+}
+
+/** Forward a submitted typing-bar utterance to the avatar window's renderer
+ * so its turn-handler picks it up via the local event bus. */
+function dispatchTypingBarSubmit(text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.webContents.send(IPC.typingBar.dispatch, trimmed);
+  }
+  hideTypingBarWindow();
+}
+
 export function registerWindowIpc(): void {
   ipcMain.handle(IPC.window.setClickThrough, (evt: IpcMainInvokeEvent, enabled: boolean) => {
     const win = BrowserWindow.fromWebContents(evt.sender);
@@ -300,6 +414,14 @@ export function registerWindowIpc(): void {
       width: bounds.width,
       height: bounds.height,
     });
+  });
+
+  ipcMain.on(IPC.typingBar.submit, (_evt, text: string) => {
+    if (typeof text !== 'string') return;
+    dispatchTypingBarSubmit(text);
+  });
+  ipcMain.on(IPC.typingBar.cancel, () => {
+    hideTypingBarWindow();
   });
 }
 

@@ -202,6 +202,16 @@ export interface FaceplatePreload {
      */
     openDevTools(target?: 'self' | 'avatar' | 'all'): Promise<void>;
   };
+  typingBar: {
+    /** Sent by the standalone typing window when the user hits Enter. */
+    submit(text: string): void;
+    /** Sent by the typing window on Esc / blur. */
+    cancel(): void;
+    /** Subscribe (avatar window) to forwarded typing-bar text. */
+    onDispatch(cb: (text: string) => void): () => void;
+    /** Subscribe (typing window) to focus-on-open events. */
+    onOpened(cb: () => void): () => void;
+  };
 }
 
 export type DeepPartial<T> = T extends object
@@ -257,5 +267,11 @@ export const IPC = {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',
     relaunch: 'faceplate:platform:relaunch',
     openDevTools: 'faceplate:platform:open-devtools',
+  },
+  typingBar: {
+    submit: 'faceplate:typing-bar:submit',
+    cancel: 'faceplate:typing-bar:cancel',
+    opened: 'faceplate:typing-bar:opened',
+    dispatch: 'faceplate:typing-bar:dispatch',
   },
 } as const;
