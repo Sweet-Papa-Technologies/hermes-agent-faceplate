@@ -34,12 +34,14 @@ import { getSettings } from './settings-store';
 import { readLlmEndpoint } from './hermes-discovery';
 
 const TIMEOUT_MS = 12_000;
-// Hard upper bound on input length passed to the small paraphrase model.
-// Gemma-4-E2B chokes on long multi-paragraph (e.g. tool-augmented research
-// answers) and frequently returns canned "please say something" garbage
-// instead of a real summary. Above this, we skip the paraphrase entirely
-// — the captions still show the full text, TTS just speaks the original.
-const PARAPHRASE_MAX_INPUT = 1_800;
+// Soft input ceiling. Above this length we TRUNCATE the input rather than
+// skip paraphrase entirely — lists / tool-augmented research answers are
+// long by nature and that's exactly when the user most wants a short TTS
+// summary. The first ~1500 chars usually carry the topic + several items,
+// which is enough for a 20-word "gist" summary. The full text still
+// renders in captions; only TTS uses the truncated paraphrase.
+const PARAPHRASE_INPUT_TRUNCATE_AT = 1_500;
+const PARAPHRASE_TRUNCATE_MARKER = '\n\n[reply continues — summarize the gist of what was covered above; do not enumerate]';
 // Patterns the tiny model emits when it gives up. Treat any of these as a
 // failure signal and fall back to the original text.
 const CANNED_FAILURE_RE =
@@ -159,25 +161,31 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
   const start = Date.now();
 
   if (cfg.model === 'disabled' || !cfg.enabled) {
+    console.log(`[paraphrase] mode=${cfg.model} enabled=${cfg.enabled} → speaking original (${text.length} chars)`);
     return { text, used: 'disabled', latency_ms: 0 };
   }
   if (text.length <= cfg.trigger_chars) {
-    return { text, used: 'skipped', latency_ms: 0 };
-  }
-  if (text.length > PARAPHRASE_MAX_INPUT) {
-    // Long answers (tool-augmented research, multi-section replies) overflow
-    // the small paraphrase model's competence. Speak the original; captions
-    // already show the full text.
-    console.warn(
-      `[paraphrase] input ${text.length} chars > ${PARAPHRASE_MAX_INPUT} ceiling, speaking original`,
-    );
+    console.log(`[paraphrase] ${text.length}≤${cfg.trigger_chars} chars (trigger_chars) → skip, speak original`);
     return { text, used: 'skipped', latency_ms: 0 };
   }
 
+  // Truncate (not skip) when too long — lists are long by nature; that's
+  // exactly when the user wants a short TTS summary, not the full readout.
+  const truncated = text.length > PARAPHRASE_INPUT_TRUNCATE_AT;
+  const userInput = truncated
+    ? text.slice(0, PARAPHRASE_INPUT_TRUNCATE_AT) + PARAPHRASE_TRUNCATE_MARKER
+    : text;
+
   const messages: ChatBody['messages'] = [
     { role: 'system', content: cfg.system_prompt },
-    { role: 'user', content: text },
+    { role: 'user', content: userInput },
   ];
+
+  console.log(
+    `[paraphrase] start: model=${cfg.model} in=${text.length} chars` +
+    `${truncated ? ` (truncated→${PARAPHRASE_INPUT_TRUNCATE_AT})` : ''}` +
+    ` target_words=${cfg.target_words} trigger=${cfg.trigger_chars}`,
+  );
 
   const tryHermesLlm = async (): Promise<ParaphraseResult> => {
     const llm = readLlmEndpoint();
@@ -226,14 +234,24 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
     };
   };
 
+  const logOutcome = (r: ParaphraseResult): ParaphraseResult => {
+    const wordCount = r.text.split(/\s+/).filter(Boolean).length;
+    console.log(
+      `[paraphrase] done: used=${r.used} in=${text.length}c → out=${r.text.length}c / ${wordCount}w` +
+      ` in ${r.latency_ms}ms${r.fallback_reason ? ` (fallback=${r.fallback_reason})` : ''}` +
+      `${r.text === text ? ' [UNCHANGED — paraphrase did not alter text]' : ''}`,
+    );
+    return r;
+  };
+
   if (cfg.model === 'reuse_hermes_llm') {
     try {
-      return await tryHermesLlm();
+      return logOutcome(await tryHermesLlm());
     } catch (err) {
       const reason = err instanceof BypassUnsafeError ? 'unsafe_to_bypass' : 'unreachable';
       console.warn(`[paraphrase] hermes LLM ${reason}, falling back to local litert-lm:`, err);
       try {
-        return await tryLitert(reason);
+        return logOutcome(await tryLitert(reason));
       } catch (err2) {
         console.error('[paraphrase] litert-lm also failed:', err2);
         return { text, used: 'skipped', latency_ms: Date.now() - start };
@@ -242,7 +260,7 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
   }
   // local_litert (default)
   try {
-    return await tryLitert();
+    return logOutcome(await tryLitert());
   } catch (err) {
     console.error('[paraphrase] litert-lm failed:', err);
     return { text, used: 'skipped', latency_ms: Date.now() - start };

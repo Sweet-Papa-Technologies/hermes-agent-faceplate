@@ -41,16 +41,31 @@ import { registerArtifactsIpc } from './artifact-store';
 import { ensureCanvasSkillInstalled } from './canvas-skill-installer';
 
 // One-shot migration: if the user's paraphrase.system_prompt matches a
-// literal previous default, upgrade to the current default. This lets us
-// improve the TTS-summary instructions over time (shorter outputs, list
-// shortening, etc.) without overwriting prompts users have customized
-// themselves. Customized prompts → no match → no change.
+// literal previous default, upgrade to the current default AND reset the
+// numeric knobs (trigger_chars, target_words) to the current defaults too.
+// Rationale: a matching legacy prompt is a strong signal the user has never
+// touched paraphrase settings; bumping the prompt without bumping the
+// numbers leaves them on stale "speak more" defaults that defeat the
+// shorter-summary intent. Customized prompts → no match → no change.
 function migrateParaphrasePrompt(): void {
   const current = getSettings().paraphrase.system_prompt;
   if (current === DEFAULT_PARAPHRASE_PROMPT) return;
   if (!PARAPHRASE_PROMPT_LEGACY_DEFAULTS.includes(current)) return;
-  applyPatch({ paraphrase: { system_prompt: DEFAULT_PARAPHRASE_PROMPT } });
-  console.log('[main] migrated paraphrase.system_prompt to current default');
+  // Defaults from settings-schema. Hard-coded here to keep the migration
+  // self-contained — if the schema defaults change, bump these too.
+  const NEW_TRIGGER_CHARS = 140;
+  const NEW_TARGET_WORDS = 15;
+  applyPatch({
+    paraphrase: {
+      system_prompt: DEFAULT_PARAPHRASE_PROMPT,
+      trigger_chars: NEW_TRIGGER_CHARS,
+      target_words: NEW_TARGET_WORDS,
+    },
+  });
+  console.log(
+    `[main] migrated paraphrase: system_prompt → new default, ` +
+    `trigger_chars=${NEW_TRIGGER_CHARS}, target_words=${NEW_TARGET_WORDS}`,
+  );
 }
 
 // One-shot: seed `hermes.api_key` from ~/.hermes/.env when empty. The wizard

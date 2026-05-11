@@ -74,18 +74,23 @@ const paraphraseModelInput = z.preprocess(
  */
 export const PARAPHRASE_PROMPT_LEGACY_DEFAULTS: readonly string[] = [
   'Rewrite the following assistant message as natural spoken English in <= 25 words. Preserve meaning, drop code blocks and URLs.',
-];
-
-export const DEFAULT_PARAPHRASE_PROMPT =
   "Summarize this assistant reply as 1-2 conversational sentences (max 20 words) for text-to-speech. " +
   "DO NOT enumerate long lists — if more than 5 items, mention the first 2-3 then say 'and several more' or 'etc.'. " +
   "Drop code blocks, URLs, JSON, and parenthetical artifact references like '(chart: ...)'. " +
-  "Keep a natural conversational tone — the user is hearing this aloud, not reading it.";
+  "Keep a natural conversational tone — the user is hearing this aloud, not reading it.",
+];
+
+export const DEFAULT_PARAPHRASE_PROMPT =
+  "You are a TTS narrator. Output ONE OR TWO short spoken sentences (15 words MAX, hard limit). " +
+  "Do NOT list items. Do NOT enumerate. If the reply contains a list of any size, say what KIND of list it is and the rough count, e.g. 'I found seven options — the highlights are X and Y' or 'There are about a dozen — want me to read them?'. " +
+  "Do NOT include numbers, bullets, code, URLs, JSON, or parenthetical asides like '(chart: …)'. " +
+  "Sound conversational — the user is HEARING this, not reading it. " +
+  "If the reply is mostly a table, chart, or artifact, say one sentence summarizing what was made, e.g. 'I drew you a bar chart of quarterly sales.'";
 
 export const ParaphraseSettings = z.object({
   enabled: z.boolean().default(true),
-  trigger_chars: z.number().int().nonnegative().default(280),
-  target_words: z.number().int().positive().default(20),
+  trigger_chars: z.number().int().nonnegative().default(140),
+  target_words: z.number().int().positive().default(15),
   model: paraphraseModelInput.default('local_litert'),
   /** Endpoint the local_litert mode posts to. Defaults to the litert-lm
    *  serve port set by scripts/start-litert.sh. */
