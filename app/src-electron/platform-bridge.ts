@@ -1,8 +1,10 @@
 // Platform-specific helpers exposed to the renderer.
 
-import { app, BrowserWindow, ipcMain, systemPreferences, webContents } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, systemPreferences, webContents } from 'electron';
 
 import { IPC } from './preload-api';
+
+const SAFE_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 
 export function registerPlatformIpc(): void {
   ipcMain.handle(IPC.platform.accessibilityTrusted, () => {
@@ -34,5 +36,16 @@ export function registerPlatformIpc(): void {
     const all = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
     const avatar = all.find((w) => /overlay/i.test(w.webContents.getURL()));
     (avatar ?? BrowserWindow.getFocusedWindow() ?? all[0])?.webContents.openDevTools(opts);
+  });
+  ipcMain.handle(IPC.platform.openExternal, async (_evt, url: string) => {
+    if (typeof url !== 'string' || url.length === 0) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return;
+    }
+    if (!SAFE_SCHEMES.has(parsed.protocol)) return;
+    await shell.openExternal(parsed.toString());
   });
 }

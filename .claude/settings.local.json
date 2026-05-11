@@ -7,7 +7,9 @@
       "WebFetch(domain:google.github.io)",
       "Read(//Users/fterry/.hermes/**)",
       "Bash(pnpm typecheck *)",
-      "Bash(docker exec hermes-personal *)"
+      "Bash(docker exec hermes-personal *)",
+      "WebFetch(domain:docs.composio.dev)",
+      "WebFetch(domain:composio.dev)"
     ]
   }
 }

@@ -34,7 +34,11 @@
         </thead>
         <tbody>
           <tr v-for="(row, ri) in sortedRows" :key="ri">
-            <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+            <td
+              v-for="(cell, ci) in row"
+              :key="ci"
+              v-html="linkify(cell)"
+            />
           </tr>
         </tbody>
       </table>
@@ -52,6 +56,7 @@
 import { computed, ref, watch, onMounted } from 'vue';
 
 import type { Artifact } from '../../stores/artifact-types';
+import { linkify } from './linkify';
 
 const props = defineProps<{ artifact: Artifact }>();
 
@@ -280,6 +285,12 @@ watch(tab, (t) => { if (t === 'source') void highlight(); });
 .csv-table th.sorted { background: rgba(127, 220, 255, 0.32); }
 .csv-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
 .csv-table tbody tr:hover { background: rgba(127, 220, 255, 0.08); }
+.csv-table :deep(a) {
+  color: #7fdcff;
+  text-decoration: underline;
+  text-decoration-color: rgba(127, 220, 255, 0.4);
+}
+.csv-table :deep(a:hover) { text-decoration-color: #7fdcff; }
 .csv-arrow {
   margin-left: 6px;
   font-size: 9px;

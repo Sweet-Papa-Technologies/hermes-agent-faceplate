@@ -1,6 +1,6 @@
 <template>
   <div class="canvas-shell" @click.self="closeWindow">
-    <div class="canvas-card">
+    <div class="canvas-card" @click="onAnchorClick" @auxclick="onAnchorClick">
       <header class="canvas-titlebar">
         <span class="canvas-titlebar-grip" aria-hidden="true">⋮⋮</span>
         <span class="canvas-titlebar-text">
@@ -140,6 +140,26 @@ async function download(): Promise<void> {
 
 function closeWindow(): void {
   window.close();
+}
+
+// Delegated handler: catch clicks (incl. middle-click via auxclick) on any
+// <a href> anywhere inside the canvas card and route them to the system
+// browser via the preload bridge. The bridge filters to http/https/mailto.
+// Runs via event delegation so it covers links inside any artifact renderer
+// (text, code, mermaid, chart tooltips, etc.) without each one wiring its
+// own handler.
+function onAnchorClick(e: MouseEvent): void {
+  // Ignore right-click / modifier-click / non-primary button-2; let the
+  // default behaviour (context menu, new tab) be a no-op rather than
+  // silently swallowing.
+  if (e.button !== 0 && e.button !== 1) return;
+  const target = e.target as HTMLElement | null;
+  const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
+  if (!anchor) return;
+  const href = anchor.getAttribute('href');
+  if (!href || href.startsWith('#')) return;
+  e.preventDefault();
+  void window.faceplate?.platform.openExternal(href);
 }
 
 function onKey(e: KeyboardEvent): void {

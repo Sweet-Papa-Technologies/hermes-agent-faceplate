@@ -218,6 +218,10 @@ export interface FaceplatePreload {
      * there; this lets the user pop DevTools open from the Settings UI.
      */
     openDevTools(target?: 'self' | 'avatar' | 'all'): Promise<void>;
+    /** Open a URL in the user's default system browser. Schemes restricted
+     * to http/https/mailto in the main-process handler — anything else is
+     * silently dropped. */
+    openExternal(url: string): Promise<void>;
   };
   typingBar: {
     /** Sent by the standalone typing window when the user hits Enter. */
@@ -333,6 +337,7 @@ export const IPC = {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',
     relaunch: 'faceplate:platform:relaunch',
     openDevTools: 'faceplate:platform:open-devtools',
+    openExternal: 'faceplate:platform:open-external',
   },
   typingBar: {
     submit: 'faceplate:typing-bar:submit',

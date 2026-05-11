@@ -115,6 +115,7 @@ const platform: FaceplatePreload['platform'] = {
   accessibilityTrusted: () => ipcRenderer.invoke(IPC.platform.accessibilityTrusted),
   relaunch: () => ipcRenderer.invoke(IPC.platform.relaunch),
   openDevTools: (target = 'self') => ipcRenderer.invoke(IPC.platform.openDevTools, target),
+  openExternal: (url: string) => ipcRenderer.invoke(IPC.platform.openExternal, url),
 };
 
 const typingBar: FaceplatePreload['typingBar'] = {

@@ -1,7 +1,7 @@
 // Faceplate main-process entry. Boots a tray-only app with one avatar window
 // (overlay or windowed per settings) and an on-demand settings window.
 
-import { app, session } from 'electron';
+import { app, session, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -215,6 +215,25 @@ void app.whenReady().then(() => {
   registerPlatformIpc();
   registerConversationsIpc();
   registerArtifactsIpc();
+
+  // Catch every webContents (avatar, canvas, settings, …) and route any
+  // attempt to open a new window — `target="_blank"`, `window.open()`, or
+  // a top-frame navigation to an external URL — to the system browser
+  // instead of spawning an in-app BrowserWindow. Belt + suspenders to the
+  // delegated <a href> click handler in CanvasPage.vue.
+  app.on('web-contents-created', (_e, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      try {
+        const parsed = new URL(url);
+        if (['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+          void shell.openExternal(parsed.toString());
+        }
+      } catch {
+        // Malformed URL — drop silently.
+      }
+      return { action: 'deny' };
+    });
+  });
 
   // Make sure there's an active conversation on disk so the renderer always
   // has somewhere to land. Creates a fresh empty one on first run.
