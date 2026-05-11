@@ -50,6 +50,15 @@ Examples:
 CHART STRUCTURE — strict: \`type\` at root; \`data\` has BOTH \`labels\` AND \`datasets\` (datasets is an ARRAY of {label, data, backgroundColor?}); \`options\` holds \`scales\`, \`plugins\`, etc. Do NOT put \`datasets\` or \`scales\` at the root — Chart.js renders blank.
 <artifact type="diagram" title="Login flow">sequenceDiagram
   User->>App: open</artifact>
+
+DIAGRAM (Mermaid) — pick the syntax that fits:
+- Flow / process            → \`flowchart LR\` or \`flowchart TD\`
+- Conversation / API calls  → \`sequenceDiagram\`
+- States / lifecycle        → \`stateDiagram-v2\`
+- Class / data model        → \`classDiagram\`
+- Timeline / schedule       → \`gantt\` — REQUIRED first lines: \`dateFormat YYYY-MM-DD\` then \`title …\`. Every task line MUST have a date or duration: \`Task name :id, 2026-01-01, 7d\`. Without dateFormat or with bare task names, mermaid crashes ("Cannot read properties of undefined (reading 'endTime')").
+- Pie chart                 → \`pie title …\` then \`"Slice" : 30\` rows
+Avoid: ER diagrams (\`erDiagram\`) unless explicitly asked — common syntax pitfalls.
 <artifact type="video" title="Funny Cat">https://www.youtube.com/watch?v=dQw4w9WgXcQ</artifact>
 <artifact type="audio" title="Song">https://open.spotify.com/track/...</artifact>
 <artifact type="image" title="Logo">https://example.com/logo.png</artifact>

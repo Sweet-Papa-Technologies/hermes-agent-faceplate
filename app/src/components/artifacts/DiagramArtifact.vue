@@ -1,7 +1,10 @@
 <template>
   <div class="diagram-artifact">
-    <div ref="hostEl" class="diagram-host" />
-    <div v-if="error" class="diagram-error">{{ error }}</div>
+    <div ref="hostEl" class="diagram-host" v-show="!error" />
+    <div v-if="error" class="diagram-fallback">
+      <div class="diagram-error">{{ error }}</div>
+      <pre class="diagram-source"><code>{{ artifact.body }}</code></pre>
+    </div>
   </div>
 </template>
 
@@ -66,15 +69,30 @@ watch(() => props.artifact.id, () => void render());
   max-width: 100%;
   height: auto;
 }
+.diagram-fallback {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
 .diagram-error {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
   font: 12px/1.4 'JetBrains Mono', ui-monospace, monospace;
   color: #ff9c9c;
-  background: rgba(0, 0, 0, 0.6);
-  padding: 6px 10px;
+  background: rgba(255, 156, 156, 0.08);
+  border: 1px solid rgba(255, 156, 156, 0.25);
+  padding: 8px 12px;
   border-radius: 6px;
+}
+.diagram-source {
+  margin: 0;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 8px;
+  overflow: auto;
+  font: 12px/1.5 'JetBrains Mono', ui-monospace, monospace;
+  color: #e6f5d6;
+  user-select: text;
+  white-space: pre-wrap;
 }
 </style>
