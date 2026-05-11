@@ -112,7 +112,9 @@ function loadConversation(id: string): ConversationFile | null {
 }
 
 function saveConversation(c: ConversationFile): void {
-  atomicWrite(convFilePath(c.id), JSON.stringify(c, null, 2));
+  const payload = JSON.stringify(c, null, 2);
+  atomicWrite(convFilePath(c.id), payload);
+  console.log(`[convsave] disk write: ${convFilePath(c.id)} (${payload.length} bytes, ${c.turns.length} turns, roles=${JSON.stringify(c.turns.map((t) => t.role))})`);
 }
 
 function previewFromTurns(turns: PersistedTurn[]): string {
@@ -197,9 +199,16 @@ export function saveActiveConversation(
   lastResponseId?: string | null,
 ): ConversationFile | null {
   const m = getManifest();
-  if (!m.active_id) return null;
+  if (!m.active_id) {
+    console.log('[convsave] main saveActiveConversation: no active_id → skipping');
+    return null;
+  }
   const c = loadConversation(m.active_id);
-  if (!c) return null;
+  if (!c) {
+    console.log(`[convsave] main saveActiveConversation: failed to load active_id=${m.active_id}`);
+    return null;
+  }
+  const before = c.turns.length;
   c.turns = turns;
   c.last_used_at = Date.now();
   c.hermes_session_id = sessionId;
@@ -210,6 +219,7 @@ export function saveActiveConversation(
   }
   saveConversation(c);
   syncManifestEntry(c);
+  console.log(`[convsave] main saveActiveConversation: id=${m.active_id.slice(0, 8)} turns ${before} → ${turns.length} roles=${JSON.stringify(turns.map((t) => t.role))} session=${sessionId ? sessionId.slice(0, 8) : 'null'}`);
   broadcast(IPC.conversations.changed, { id: c.id, conversation: c });
   return c;
 }
@@ -333,8 +343,10 @@ export function registerConversationsIpc(): void {
   ipcMain.handle(IPC.conversations.setActive, (_e, id: string) => setActiveConversation(id));
   ipcMain.handle(
     IPC.conversations.saveActive,
-    (_e, turns: PersistedTurn[], sessionId: string | null, lastResponseId?: string | null) =>
-      saveActiveConversation(turns, sessionId, lastResponseId),
+    (_e, turns: PersistedTurn[], sessionId: string | null, lastResponseId?: string | null) => {
+      console.log(`[convsave] IPC saveActive RECEIVED: turns.len=${Array.isArray(turns) ? turns.length : 'NOT-ARRAY'} roles=${Array.isArray(turns) ? JSON.stringify(turns.map((t) => t?.role)) : '?'} session=${sessionId ? sessionId.slice(0, 8) : 'null'} respId=${lastResponseId === undefined ? '(unset)' : lastResponseId === null ? 'null' : lastResponseId.slice(0, 8)}`);
+      return saveActiveConversation(turns, sessionId, lastResponseId);
+    },
   );
   ipcMain.handle(
     IPC.conversations.updateTitle,

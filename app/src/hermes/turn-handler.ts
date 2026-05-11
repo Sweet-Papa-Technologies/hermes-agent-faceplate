@@ -41,6 +41,18 @@ let active: ActiveTurn | null = null;
 let attached = false;
 let detach: (() => void) | null = null;
 
+// Cross-module-reload guard. Vite HMR replaces the turn-handler module on
+// edit, but the OLD module's eventBus subscriptions remain attached — the
+// new module's `attached` flag is false, so it adds a SECOND set of
+// listeners. Result: every `user.input.text` fires runTurn twice → two
+// user turns saved with the same text, no assistant turn (because the
+// second run barges in before the first's `startTurn('assistant')` runs).
+//
+// Stash the previous detach on globalThis so the next attach can clean
+// up regardless of which module the previous attach came from.
+const GLOBAL_DETACH_KEY = '__faceplate_turn_handler_detach__';
+type GlobalWithDetach = typeof globalThis & { [GLOBAL_DETACH_KEY]?: () => void };
+
 // Session id for hermes-agent's /v1/runs is sourced from the active
 // conversation, NOT a module variable. That way it survives app restarts
 // (loaded from disk on boot) and follows the user across conversation
@@ -74,6 +86,15 @@ let speakCount = 0;
 
 export function attachTurnHandler(): void {
   if (attached) return;
+  // Defensive: if a previous module instance left listeners attached
+  // (hot reload), tear them down before adding ours.
+  const g = globalThis as GlobalWithDetach;
+  const prior = g[GLOBAL_DETACH_KEY];
+  if (typeof prior === 'function') {
+    console.log('[turn] attachTurnHandler: tearing down stale listeners from prior module instance');
+    try { prior(); } catch (err) { console.warn('[turn] prior detach threw:', err); }
+  }
+
   const offText = eventBus.on('user.input.text', (e) => void runTurn(e.payload.text));
   const offVoice = eventBus.on('user.input.voice', (e) => void runTurn(e.payload.text));
   const offInterrupt = eventBus.on('user.interrupt', () => interrupt('user.interrupt'));
@@ -84,12 +105,16 @@ export function attachTurnHandler(): void {
     interrupt('detach');
   };
   attached = true;
+  g[GLOBAL_DETACH_KEY] = detach;
+  console.log('[turn] attachTurnHandler: handlers wired');
 }
 
 export function detachTurnHandler(): void {
   detach?.();
   detach = null;
   attached = false;
+  const g = globalThis as GlobalWithDetach;
+  delete g[GLOBAL_DETACH_KEY];
 }
 
 export function interrupt(reason: string): void {
@@ -133,7 +158,7 @@ export function interrupt(reason: string): void {
 
 async function runTurn(userText: string): Promise<void> {
   const id = ++turnCount;
-  console.log(`[turn] runTurn #${id} START len=${userText.length} active=${active ? 'yes(barge-in)' : 'no'} text="${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
+  console.log(`[convsave] runTurn #${id} START text="${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}" active=${active ? 'yes(barge-in)' : 'no'}`);
   if (active) interrupt('barge-in');
 
   const settings = useSettingsStore();
@@ -286,11 +311,10 @@ async function runTurn(userText: string): Promise<void> {
   // or a Pinia action-tracking edge case). This explicit save guarantees
   // the assistant turn lands on disk.
   const convs = useConversationsStore();
+  const snap = convo.snapshotForPersist();
+  console.log(`[convsave] runTurn #${id} END snapshot.turns=${snap.length} roles=${JSON.stringify(snap.map((t) => t.role))} activeId=${convs.activeId ?? 'null'}`);
   if (convs.activeId) {
-    void convs.saveActive(
-      convo.snapshotForPersist(),
-      convs.activeSessionId,
-    );
+    void convs.saveActive(snap, convs.activeSessionId);
   }
 }
 

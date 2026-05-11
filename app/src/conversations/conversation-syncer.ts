@@ -43,8 +43,12 @@ export function attachConversationSyncer(): void {
   detachAction = convo.$onAction(({ name, after }) => {
     if (name !== 'finalizeTurn') return;
     after(() => {
-      if (!convs.activeId) return;
+      if (!convs.activeId) {
+        console.log('[convsave] syncer: finalize fired but no activeId — skipping save');
+        return;
+      }
       const turns = convo.snapshotForPersist();
+      console.log(`[convsave] syncer: $onAction finalize → save (turns=${turns.length}, roles=${JSON.stringify(turns.map((t) => t.role))})`);
       void convs.saveActive(turns, convs.activeSessionId);
       void maybeAutoTitle(turns);
     });

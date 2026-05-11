@@ -14,7 +14,11 @@ import { watch } from 'vue';
 import { useSettingsStore } from '../stores/settings';
 import { attachPttController, detachPttController } from '../audio/ptt-controller';
 import { startWakeClient, stopWakeClient } from '../audio/wake-client';
-import { attachTurnHandler, interrupt as interruptTurn } from '../hermes/turn-handler';
+import {
+  attachTurnHandler,
+  detachTurnHandler,
+  interrupt as interruptTurn,
+} from '../hermes/turn-handler';
 import {
   attachConversationSyncer,
   detachConversationSyncer,
@@ -87,9 +91,15 @@ export default boot(({ router }) => {
 
   if (import.meta.hot) {
     import.meta.hot.dispose(() => {
+      // Tear down EVERYTHING on hot reload. Without detachTurnHandler
+      // here, every save+reload cycle in dev leaves the prior module's
+      // user.input.text listener alive — so the next user message fires
+      // runTurn TWICE, producing the [user, user] disk state we saw
+      // (each duplicate barges in before the assistant turn finalizes).
       detachPttController();
       stopWakeClient();
       detachConversationSyncer();
+      detachTurnHandler();
     });
   }
 });

@@ -70,4 +70,40 @@ export default boot(async () => {
       artifactsStore.applyChanged(msg);
     });
   }
+
+  // Console-accessible debug helper. Call `__faceplate.dump()` in the
+  // DevTools console to dump in-memory conversation state alongside the
+  // disk state we last got from main. Useful when chasing save bugs.
+  (window as unknown as { __faceplate?: unknown }).__faceplate = {
+    dump: async () => {
+      const a = convs.active;
+      const live = (await import('../stores/conversation')).useConversationStore();
+      const onDisk = await window.faceplate?.conversations.getActive();
+      const out = {
+        active_id: convs.activeId,
+        active_title: a?.title,
+        active_session: a?.hermes_session_id,
+        active_last_response: a?.hermes_last_response_id,
+        in_memory_history: live.history.map((t) => ({
+          role: t.role,
+          textLen: t.text.length,
+          arts: (t.artifact_ids ?? []).length,
+          tools: (t.tool_calls ?? []).length,
+        })),
+        in_memory_currentTurn: live.currentTurn
+          ? { role: live.currentTurn.role, textLen: live.currentTurn.text.length }
+          : null,
+        on_disk_turns: onDisk?.turns.map((t) => ({
+          role: t.role,
+          textLen: t.text.length,
+          arts: (t.artifact_ids ?? []).length,
+          tools: (t.tool_calls ?? []).length,
+        })) ?? [],
+      };
+      console.table(out.in_memory_history);
+      console.table(out.on_disk_turns);
+      console.log(out);
+      return out;
+    },
+  };
 });

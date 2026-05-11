@@ -49,7 +49,11 @@ export const useConversationStore = defineStore('conversation', () => {
       ts: Date.now(),
       streaming: true,
     };
-    if (currentTurn.value) finalizeTurn();
+    if (currentTurn.value) {
+      console.log(`[convsave] startTurn(${role}): currentTurn was ${currentTurn.value.role} (text.len=${currentTurn.value.text.length}); cascading finalize first`);
+      finalizeTurn();
+    }
+    console.log(`[convsave] startTurn(${role}) → id=${turn.id.slice(0, 8)} (history.len=${history.value.length})`);
     currentTurn.value = turn;
     return turn;
   }
@@ -105,10 +109,15 @@ export const useConversationStore = defineStore('conversation', () => {
   }
 
   function finalizeTurn(): void {
-    if (!currentTurn.value) return;
-    const finalised: Turn = { ...currentTurn.value, streaming: false };
+    if (!currentTurn.value) {
+      console.log('[convsave] finalizeTurn: no currentTurn (no-op)');
+      return;
+    }
+    const t = currentTurn.value;
+    const finalised: Turn = { ...t, streaming: false };
     history.value = [...history.value.slice(-(MAX_HISTORY - 1)), finalised];
     currentTurn.value = null;
+    console.log(`[convsave] finalizeTurn(${t.role}) text.len=${t.text.length} arts=${(t.artifact_ids ?? []).length} tools=${(t.tool_calls ?? []).length} → history.len=${history.value.length}`);
   }
 
   function clear(): void {
@@ -133,30 +142,29 @@ export const useConversationStore = defineStore('conversation', () => {
   }
 
   /** Snapshot the full turn list for disk persistence. Includes the in-flight
-   * turn (so partial assistant replies are recoverable on a clean shutdown). */
+   * turn (so partial assistant replies are recoverable on a clean shutdown).
+   *
+   * Returns plain (non-reactive) data: nested arrays like `tool_calls` and
+   * `artifact_ids` live inside Vue's reactive `history` Proxy, and Electron's
+   * contextBridge IPC throws "An object could not be cloned" if a Proxy ends
+   * up in the payload. JSON-roundtripping every turn strips the proxies and
+   * matches what main writes to disk anyway. */
   function snapshotForPersist(): PersistedTurn[] {
-    const list: PersistedTurn[] = history.value.map((t) => ({
+    const build = (t: Turn): PersistedTurn => ({
       id: t.id,
       role: t.role,
       text: t.text,
       ts: t.ts,
-      ...(t.tool_calls ? { tool_calls: t.tool_calls } : {}),
-      ...(t.artifact_ids ? { artifact_ids: t.artifact_ids } : {}),
+      ...(t.tool_calls?.length ? { tool_calls: t.tool_calls } : {}),
+      ...(t.artifact_ids?.length ? { artifact_ids: t.artifact_ids } : {}),
       ...(t.model ? { model: t.model } : {}),
       ...(t.error ? { error: t.error } : {}),
-    }));
+    });
+    const list: PersistedTurn[] = history.value.map(build);
     if (currentTurn.value && currentTurn.value.text.length > 0) {
-      const t = currentTurn.value;
-      list.push({
-        id: t.id,
-        role: t.role,
-        text: t.text,
-        ts: t.ts,
-        ...(t.tool_calls ? { tool_calls: t.tool_calls } : {}),
-        ...(t.artifact_ids ? { artifact_ids: t.artifact_ids } : {}),
-      });
+      list.push(build(currentTurn.value));
     }
-    return list;
+    return JSON.parse(JSON.stringify(list)) as PersistedTurn[];
   }
 
   const captionText = computed(() => currentTurn.value?.text ?? '');

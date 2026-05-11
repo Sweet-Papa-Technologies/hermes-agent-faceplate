@@ -158,8 +158,18 @@ export const useConversationsStore = defineStore('conversations', () => {
     lastResponseId?: string | null,
   ): Promise<void> {
     const fp = window.faceplate;
-    if (!fp) return;
-    const updated = await fp.conversations.saveActive(turns, sessionId, lastResponseId);
+    if (!fp) {
+      console.log('[convsave] saveActive: no faceplate bridge, skipping');
+      return;
+    }
+    // Defence-in-depth: structured-clone over contextBridge will throw
+    // "An object could not be cloned" if any caller hands us a Vue reactive
+    // Proxy. JSON-roundtrip strips the proxies — disk persistence is JSON
+    // anyway, so there is no information loss.
+    const safeTurns = JSON.parse(JSON.stringify(turns)) as typeof turns;
+    console.log(`[convsave] saveActive IPC SEND: turns.len=${safeTurns.length} roles=${JSON.stringify(safeTurns.map((t) => t.role))} → main`);
+    const updated = await fp.conversations.saveActive(safeTurns, sessionId, lastResponseId);
+    console.log(`[convsave] saveActive IPC REPLY: updated=${updated ? `id=${updated.id.slice(0, 8)} turns=${updated.turns.length}` : 'null'}`);
     if (updated) active.value = updated;
   }
 
