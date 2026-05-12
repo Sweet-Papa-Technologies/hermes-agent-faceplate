@@ -12,12 +12,14 @@ import { Notify } from 'quasar';
 import { watch } from 'vue';
 
 import { useSettingsStore } from '../stores/settings';
+import { useAgentStore } from '../stores/agent';
 import { attachPttController, detachPttController } from '../audio/ptt-controller';
 import { startWakeClient, stopWakeClient } from '../audio/wake-client';
 import {
   attachTurnHandler,
   detachTurnHandler,
   interrupt as interruptTurn,
+  setActiveTtsMuted,
 } from '../hermes/turn-handler';
 import {
   attachConversationSyncer,
@@ -76,6 +78,17 @@ export default boot(({ router }) => {
       }
     },
     { immediate: true },
+  );
+
+  // Mute toggle drives the live <audio> element's .muted property — same
+  // semantic as the OS mute or YouTube's mute button. The captions, the
+  // assistant turn, the viseme animation, and the natural speaking→idle
+  // transition all continue uninterrupted; the user just doesn't hear it.
+  // Aborting the turn here (as STOP does) would feel like "stop response,"
+  // not "mute," and would clobber the in-flight text.
+  watch(
+    () => useAgentStore().muted,
+    (muted) => setActiveTtsMuted(muted),
   );
 
   // The interrupt hotkey has TWO concurrent handlers, intentionally:

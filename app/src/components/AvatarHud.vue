@@ -60,7 +60,19 @@
     </button>
 
     <transition name="hud-menu-fade">
-      <div v-if="menuOpen" ref="menuEl" class="hud-menu-pop" role="menu">
+      <!-- Mark the popup as its own hit region. The parent .hud is a thin
+           absolutely-positioned strip; this popup overflows it (top: 32px),
+           so without an explicit marker the avatar's mousemove → hit-test
+           sees the popup as "outside the avatar" and re-enables overlay
+           click-through, making every button after the first click pass
+           straight through to the desktop. -->
+      <div
+        v-if="menuOpen"
+        ref="menuEl"
+        class="hud-menu-pop"
+        role="menu"
+        data-faceplate-hit-region="hud-menu"
+      >
         <!-- Big touchable size buttons. The corner-drag handles on a
              transparent always-on-top window are hard to grab; this is
              the primary way users resize the overlay. -->

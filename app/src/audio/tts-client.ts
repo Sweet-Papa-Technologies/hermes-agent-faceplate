@@ -51,6 +51,10 @@ export interface SpeakHandle {
   done: Promise<'natural' | 'interrupt' | 'error'>;
   /** Stop playback. */
   abort(): void;
+  /** Silence (or un-silence) live audio output without altering the rest
+   * of the pipeline — captions, viseme analyser, agent state, and natural
+   * end-of-stream all continue normally. Cheap to call repeatedly. */
+  setMuted(muted: boolean): void;
   mime: TtsMime;
   format: TtsFormat;
 }
@@ -138,6 +142,7 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
   return {
     done,
     abort: () => internalAbort.abort(),
+    setMuted: (muted: boolean) => { audio.muted = muted; },
     mime,
     format,
   };

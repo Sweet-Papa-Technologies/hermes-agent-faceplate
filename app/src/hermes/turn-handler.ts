@@ -117,6 +117,16 @@ export function detachTurnHandler(): void {
   delete g[GLOBAL_DETACH_KEY];
 }
 
+/** Silence (or restore) the in-flight TTS audio without aborting the turn.
+ * No-op when there's no active TTS handle — safe to call freely from a
+ * mute-toggle watcher. The agent's `speaking` state still transitions to
+ * idle naturally when the silenced playback ends, the assistant text stays
+ * in the conversation, and the viseme driver keeps animating off the
+ * (still-decoding) waveform. */
+export function setActiveTtsMuted(muted: boolean): void {
+  active?.tts?.setMuted(muted);
+}
+
 export function interrupt(reason: string): void {
   if (!active) return;
   const a = active;
