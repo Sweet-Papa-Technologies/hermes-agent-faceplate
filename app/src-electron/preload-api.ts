@@ -54,6 +54,40 @@ export interface HermesLocalConfig {
   };
 }
 
+/** Snapshot of the bundled Kokoro Docker container + endpoint state. The
+ * UI uses these four flags to decide which action button to show:
+ *   - !docker_available             → "Install Docker first"
+ *   - container_state=missing       → "Install + start Kokoro"
+ *   - container_state=exited        → "Start Kokoro"
+ *   - container_state=running       → "Stop Kokoro"
+ *   - reachable && container_state=missing → user runs Kokoro themselves;
+ *     hide the lifecycle buttons (we don't own that container). */
+export interface KokoroStatus {
+  docker_available: boolean;
+  container_state: 'running' | 'exited' | 'missing';
+  reachable: boolean;
+  base_url: string;
+}
+
+/** Frame shape pushed by the Hermes faceplate plugin's WebSocket server.
+ * Mirrors hermes-plugin/faceplate/adapter.py's send-side JSON. */
+export interface AgentPushFrame {
+  type: 'message' | 'hello';
+  chat_id: string;
+  thread_id: string | null;
+  text: string;
+  media: Array<{ kind: string; url: string }> | null;
+  ts: number;
+}
+
+export interface AgentPushStatus {
+  enabled: boolean;
+  connected: boolean;
+  url: string;
+  last_error: string | null;
+  last_frame_at: number | null;
+}
+
 /** Payload for `faceplate:notify:show`. Kept tight on purpose — the main
  * process owns formatting, sound choice, click routing, and dedup. */
 export interface NotifyOptions {
@@ -249,6 +283,26 @@ export interface FaceplatePreload {
      * silently dropped. */
     openExternal(url: string): Promise<void>;
   };
+  agentPush: {
+    /** Subscribe to unprompted-message frames pushed from the Hermes
+     * faceplate plugin. The main process owns the WebSocket; this just
+     * surfaces decoded frames to the renderer. */
+    onFrame(cb: (frame: AgentPushFrame) => void): () => void;
+    /** Current connection state. Polled by the Settings UI for a status chip. */
+    status(): Promise<AgentPushStatus>;
+  };
+  kokoro: {
+    /** Lightweight status snapshot. Used by the Kokoro engine card to
+     * decide whether to show "Install + start", "Start", or "Stop". */
+    status(): Promise<KokoroStatus>;
+    /** One-click "make Kokoro work" — pulls the image if missing, starts
+     * the container, polls until /v1/voices answers. Long-running
+     * (image pull is ~340 MB on first call). Throws on Docker missing
+     * or container failure to come up. */
+    ensure(): Promise<KokoroStatus>;
+    /** Stop the container without removing it. Idempotent. */
+    stop(): Promise<KokoroStatus>;
+  };
   notify: {
     /** Fire an OS notification. The main process gates on settings
      * (enabled, mode, DND hours, foregrounded suppression) — callers don't
@@ -392,6 +446,20 @@ export const IPC = {
     show: 'faceplate:notify:show',
     clicked: 'faceplate:notify:clicked',
     replied: 'faceplate:notify:replied',
+  },
+  agentPush: {
+    /** main → renderer broadcast: a Hermes plugin frame arrived. */
+    received: 'faceplate:agent-push:received',
+    /** renderer → main: lifecycle status query. */
+    status: 'faceplate:agent-push:status',
+  },
+  kokoro: {
+    /** Status of the bundled Kokoro Docker container + reachability. */
+    status: 'faceplate:kokoro:status',
+    /** Pull (if missing) + start the container, then poll until ready. */
+    ensure: 'faceplate:kokoro:ensure',
+    /** Stop (but keep) the container — next ensure() will `docker start`. */
+    stop: 'faceplate:kokoro:stop',
   },
   platform: {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',

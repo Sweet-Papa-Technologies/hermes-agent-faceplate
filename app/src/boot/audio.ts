@@ -25,6 +25,10 @@ import {
   attachConversationSyncer,
   detachConversationSyncer,
 } from '../conversations/conversation-syncer';
+import {
+  attachAgentPushHandler,
+  detachAgentPushHandler,
+} from '../agent-push/agent-push-handler';
 
 export default boot(({ router }) => {
   // Audio pipeline must initialise in EXACTLY one renderer — the overlay /
@@ -50,6 +54,11 @@ export default boot(({ router }) => {
   // conversation on disk, persist on every finalize, follow cross-window
   // switches initiated by the conversation panel.
   attachConversationSyncer();
+  // Subscribe to unprompted Hermes-initiated messages (Phase 6). The
+  // main-process WebSocket bridge owns the connection; this handler
+  // injects incoming frames into the dedicated "Hermes pings"
+  // conversation and fires an OS notification.
+  attachAgentPushHandler();
 
   const settings = useSettingsStore();
   watch(
@@ -112,6 +121,7 @@ export default boot(({ router }) => {
       detachPttController();
       stopWakeClient();
       detachConversationSyncer();
+      detachAgentPushHandler();
       detachTurnHandler();
     });
   }

@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watchEffect } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 import { useSetting } from '../../composables/use-setting';
 import { SYSTEM_DEFAULT_DEVICE } from '../../stores/settings-schema';
@@ -176,13 +176,20 @@ function openMacSettings(): void {
   });
 }
 
-watchEffect(async () => {
-  void _inputDeviceSetting.value;
+// Re-enumerate on hot-plug (USB headset unplug/replug) so the dropdown
+// reflects what's actually connected without forcing a tab switch.
+function onDeviceChange(): void {
+  void refreshDevices();
+}
+
+onMounted(async () => {
+  void checkPermission();
   await refreshDevices();
+  navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
 });
 
-onMounted(() => {
-  void checkPermission();
+onBeforeUnmount(() => {
+  navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
 });
 </script>
 

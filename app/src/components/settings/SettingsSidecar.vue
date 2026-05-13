@@ -41,6 +41,70 @@
         <q-option-group v-model="ttsEngine" type="radio" :options="engineOptions" inline />
       </q-card-section>
       <q-separator />
+      <q-card-section v-if="ttsEngine === 'kokoro'">
+        <!-- Kokoro lifecycle card. Polls every 3s while this tab is open
+             and surfaces a single primary action: install+start, start,
+             or stop, depending on what the main process found. If the
+             user runs Kokoro themselves under a different container
+             name, we detect "reachable but our container missing" and
+             hide the buttons (we don't own that). -->
+        <div class="kokoro-lifecycle">
+          <div class="kokoro-status-row">
+            <q-chip
+              :color="kokoroChip.color"
+              :icon="kokoroChip.icon"
+              text-color="white"
+              dense
+            >
+              {{ kokoroChip.label }}
+            </q-chip>
+            <q-chip v-if="kokoroStatus?.base_url" outline dense>
+              {{ kokoroStatus.base_url }}
+            </q-chip>
+          </div>
+          <div class="kokoro-actions q-mt-sm">
+            <q-btn
+              v-if="kokoroPrimary === 'install'"
+              color="primary"
+              no-caps
+              icon="rocket_launch"
+              :label="kokoroBusy ? 'Pulling image + starting (this can take a few minutes on first run)…' : 'Install + start Kokoro'"
+              :loading="kokoroBusy"
+              @click="ensureKokoro"
+            />
+            <q-btn
+              v-else-if="kokoroPrimary === 'start'"
+              color="primary"
+              no-caps
+              icon="play_arrow"
+              :label="kokoroBusy ? 'Starting…' : 'Start Kokoro'"
+              :loading="kokoroBusy"
+              @click="ensureKokoro"
+            />
+            <q-btn
+              v-else-if="kokoroPrimary === 'stop'"
+              outline
+              no-caps
+              icon="stop"
+              :label="kokoroBusy ? 'Stopping…' : 'Stop Kokoro'"
+              :loading="kokoroBusy"
+              @click="stopKokoroBtn"
+            />
+            <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="refreshKokoro" />
+          </div>
+          <q-banner v-if="kokoroError" class="warn q-mt-sm" dense>
+            <template #avatar><q-icon name="warning" color="warning" /></template>
+            {{ kokoroError }}
+          </q-banner>
+          <q-banner v-if="kokoroStatus && !kokoroStatus.docker_available" class="warn q-mt-sm" dense>
+            <template #avatar><q-icon name="warning" color="warning" /></template>
+            Docker isn't installed (or isn't on PATH). Install Docker Desktop, then come back here.
+          </q-banner>
+        </div>
+      </q-card-section>
+
+      <q-separator v-if="ttsEngine === 'kokoro'" />
+
       <q-card-section v-if="ttsEngine === 'kokoro'" class="row q-col-gutter-md">
         <q-input
           v-model="kokoroUrl"
@@ -48,7 +112,7 @@
           label="Kokoro FastAPI URL"
           filled
           stack-label
-          hint="Default: http://127.0.0.1:8880 — start with `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest`."
+          hint="Default: http://127.0.0.1:8880 — the lifecycle card above will install+start a container on this port for you."
         />
         <q-select
           v-model="kokoroVoice"
@@ -184,12 +248,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 
 import { useSetting } from '../../composables/use-setting';
 import TestConnectionButton from './TestConnectionButton.vue';
-import type { SidecarStatus } from '../../../src-electron/preload-api';
+import type { SidecarStatus, KokoroStatus } from '../../../src-electron/preload-api';
 
 const mode = useSetting('speech.sidecar_mode');
 const url = useSetting('speech.sidecar_url');
@@ -217,6 +281,96 @@ const kokoroVoiceOptions = [
   { label: 'bf_emma — British female (B grade)', value: 'bf_emma' },
   { label: 'bm_george — British male (B grade)', value: 'bm_george' },
 ];
+
+// ─── Kokoro lifecycle ────────────────────────────────────────────────────
+//
+// Status polled every 3 s while the user is on this tab. Drives a single
+// primary action button that adapts to current state. We never own a
+// container the user started themselves — if the endpoint is reachable
+// but our named container is missing, the buttons hide.
+const kokoroStatus = ref<KokoroStatus | null>(null);
+const kokoroBusy = ref(false);
+const kokoroError = ref<string | null>(null);
+let kokoroPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const kokoroPrimary = computed<'install' | 'start' | 'stop' | 'none'>(() => {
+  const s = kokoroStatus.value;
+  if (!s) return 'none';
+  if (!s.docker_available) return 'none';
+  // If Kokoro is reachable but the container we manage isn't there, the
+  // user runs their own — don't offer to manage what we don't own.
+  if (s.reachable && s.container_state === 'missing') return 'none';
+  if (s.container_state === 'missing') return 'install';
+  if (s.container_state === 'exited') return 'start';
+  return 'stop';
+});
+
+const kokoroChip = computed(() => {
+  const s = kokoroStatus.value;
+  if (!s) return { label: 'Checking…', icon: 'hourglass_top', color: 'grey-6' };
+  if (!s.docker_available) return { label: 'Docker not found', icon: 'block', color: 'grey-6' };
+  if (s.reachable) return { label: 'Reachable', icon: 'check_circle', color: 'positive' };
+  if (s.container_state === 'running') return { label: 'Container up, not yet ready', icon: 'sync', color: 'orange' };
+  if (s.container_state === 'exited') return { label: 'Container stopped', icon: 'pause_circle', color: 'grey-6' };
+  return { label: 'Not installed', icon: 'download', color: 'grey-6' };
+});
+
+async function refreshKokoro(): Promise<void> {
+  if (!window.faceplate) return;
+  try {
+    kokoroStatus.value = await window.faceplate.kokoro.status();
+  } catch (err) {
+    console.warn('[settings.sidecar] kokoro.status threw:', err);
+  }
+}
+
+async function ensureKokoro(): Promise<void> {
+  if (!window.faceplate || kokoroBusy.value) return;
+  kokoroBusy.value = true;
+  kokoroError.value = null;
+  try {
+    kokoroStatus.value = await window.faceplate.kokoro.ensure();
+    $q.notify({ type: 'positive', message: 'Kokoro is up and reachable.', timeout: 3000 });
+  } catch (err) {
+    kokoroError.value = err instanceof Error ? err.message : String(err);
+    $q.notify({ type: 'negative', message: kokoroError.value, timeout: 6000 });
+  } finally {
+    kokoroBusy.value = false;
+    void refreshKokoro();
+  }
+}
+
+async function stopKokoroBtn(): Promise<void> {
+  if (!window.faceplate || kokoroBusy.value) return;
+  kokoroBusy.value = true;
+  kokoroError.value = null;
+  try {
+    kokoroStatus.value = await window.faceplate.kokoro.stop();
+  } catch (err) {
+    kokoroError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    kokoroBusy.value = false;
+  }
+}
+
+watch(ttsEngine, (engine) => {
+  if (engine === 'kokoro') {
+    void refreshKokoro();
+    if (!kokoroPollTimer) kokoroPollTimer = setInterval(() => void refreshKokoro(), 3_000);
+  } else {
+    if (kokoroPollTimer) {
+      clearInterval(kokoroPollTimer);
+      kokoroPollTimer = null;
+    }
+  }
+}, { immediate: true });
+
+onBeforeUnmount(() => {
+  if (kokoroPollTimer) {
+    clearInterval(kokoroPollTimer);
+    kokoroPollTimer = null;
+  }
+});
 
 // Auto-derive model id from the voice id. The model is just a backend tag —
 // for Piper it's always `piper:<voice>`. Users almost never need to change
@@ -435,4 +589,9 @@ h2 { font-size: 22px; margin: 0 0 8px; }
 h3 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; color: #555; text-transform: uppercase; letter-spacing: 0.05em; }
 .muted { color: #666; margin-bottom: 16px; }
 .card { margin-bottom: 16px; border-radius: 10px; }
+
+.kokoro-lifecycle { display: flex; flex-direction: column; gap: 4px; }
+.kokoro-status-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kokoro-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.warn { background: rgba(245, 158, 11, 0.12); border-radius: 8px; }
 </style>

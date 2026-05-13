@@ -94,6 +94,18 @@ const tabs: TabDef[] = [
     load: () => import('../components/settings/SettingsArtifacts.vue'),
   },
   {
+    id: 'notifications',
+    label: 'Notifications',
+    icon: 'notifications_active',
+    load: () => import('../components/settings/SettingsNotifications.vue'),
+  },
+  {
+    id: 'agent_push',
+    label: 'Hermes Pings',
+    icon: 'forward_to_inbox',
+    load: () => import('../components/settings/SettingsAgentPush.vue'),
+  },
+  {
     id: 'privacy',
     label: 'Privacy',
     icon: 'privacy_tip',

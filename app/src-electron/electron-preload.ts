@@ -120,6 +120,24 @@ const platform: FaceplatePreload['platform'] = {
   openExternal: (url: string) => ipcRenderer.invoke(IPC.platform.openExternal, url),
 };
 
+const kokoro: FaceplatePreload['kokoro'] = {
+  status: () => ipcRenderer.invoke(IPC.kokoro.status),
+  ensure: () => ipcRenderer.invoke(IPC.kokoro.ensure),
+  stop: () => ipcRenderer.invoke(IPC.kokoro.stop),
+};
+
+const agentPush: FaceplatePreload['agentPush'] = {
+  onFrame: (cb) => {
+    const listener = (
+      _e: unknown,
+      frame: import('./preload-api').AgentPushFrame,
+    ) => cb(frame);
+    ipcRenderer.on(IPC.agentPush.received, listener);
+    return () => ipcRenderer.removeListener(IPC.agentPush.received, listener);
+  },
+  status: () => ipcRenderer.invoke(IPC.agentPush.status),
+};
+
 const notify: FaceplatePreload['notify'] = {
   show: (opts) => ipcRenderer.invoke(IPC.notify.show, opts),
   onClicked: (cb) => {
@@ -238,6 +256,8 @@ const api: FaceplatePreload = {
   events,
   platform,
   notify,
+  agentPush,
+  kokoro,
   typingBar,
   conversations,
   artifacts,

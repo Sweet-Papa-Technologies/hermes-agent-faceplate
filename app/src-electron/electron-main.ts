@@ -35,6 +35,8 @@ import { registerEventBridgeIpc } from './event-bridge';
 import { registerPlatformIpc } from './platform-bridge';
 import { registerNotificationsIpc } from './notifications-bridge';
 import { registerArtifactFixIpc } from './artifact-fix-bridge';
+import { startAgentPushBridge, stopAgentPushBridge } from './agent-push-bridge';
+import { registerKokoroIpc } from './kokoro-lifecycle';
 import {
   ensureBootstrapConversation,
   registerConversationsIpc,
@@ -258,6 +260,8 @@ void app.whenReady().then(() => {
   registerConversationsIpc();
   registerArtifactsIpc();
   registerArtifactFixIpc();
+  startAgentPushBridge();
+  registerKokoroIpc();
 
   // Catch every webContents (avatar, canvas, settings, …) and route any
   // attempt to open a new window — `target="_blank"`, `window.open()`, or
@@ -344,4 +348,5 @@ app.on('will-quit', () => {
   unregisterAll();
   destroyTray();
   void stopHookListener();
+  stopAgentPushBridge();
 });

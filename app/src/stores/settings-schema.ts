@@ -233,6 +233,29 @@ export const ArtifactsSettings = z.object({
   eagerness: z.enum(['subtle', 'balanced', 'liberal', 'aggressive']).default('balanced'),
 });
 
+export const AgentPushSettings = z.object({
+  /** Master toggle. When false, the renderer never opens the WebSocket
+   * to the Hermes faceplate plugin. Off by default — the user has to
+   * install the plugin (see hermes-plugin/README.md) before this is
+   * useful. */
+  enabled: z.boolean().default(false),
+  /** WS URL of the Hermes faceplate plugin's local server. Default
+   * matches the plugin's default port. */
+  url: z.string().url().or(z.string().regex(/^wss?:\/\//)).default('ws://127.0.0.1:8643/ws'),
+  /** API key shared with the Hermes plugin (same value as the env var
+   * FACEPLATE_API_KEY in ~/.hermes/.env). Sent as `Authorization: Bearer
+   * <key>` on the WS handshake. */
+  api_key: z.string().default(''),
+  /** Subscribe to a single chat_id (matches FACEPLATE_HOME_CHANNEL on
+   * the Hermes side). '*' subscribes to all chat_ids the plugin pushes. */
+  chat_id: z.string().default('default'),
+  /** When a push arrives, also speak it via TTS. Off by default — most
+   * unprompted pings are quiet "FYI" messages and the user might be
+   * away from the computer / on a call. The captions panel + OS
+   * notification still surface them. */
+  speak: z.boolean().default(false),
+});
+
 export const NotificationsSettings = z.object({
   /** Master toggle. When false, no OS notifications fire regardless of mode. */
   enabled: z.boolean().default(true),
@@ -268,6 +291,7 @@ export const FaceplateSettings = z.object({
   paraphrase: ParaphraseSettings.default({}),
   speech: SpeechSettings.default({}),
   notifications: NotificationsSettings.default({}),
+  agent_push: AgentPushSettings.default({}),
   input: InputSettings.default({}),
   output: OutputSettings.default({}),
   hotkeys: HotkeysSettings.default({}),
@@ -290,6 +314,7 @@ export type PrivacySettings = z.infer<typeof PrivacySettings>;
 export type ArtifactsSettings = z.infer<typeof ArtifactsSettings>;
 export type LinuxSettings = z.infer<typeof LinuxSettings>;
 export type NotificationsSettings = z.infer<typeof NotificationsSettings>;
+export type AgentPushSettings = z.infer<typeof AgentPushSettings>;
 
 export function defaultSettings(): FaceplateSettings {
   return FaceplateSettings.parse({});

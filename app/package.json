@@ -30,6 +30,7 @@
     "vue": "^3.5.22",
     "vue-i18n": "^11.3.0",
     "vue-router": "^5.0.3",
+    "ws": "^8.20.1",
     "yaml": "^2.7.0",
     "zod": "^3.24.1"
   },
@@ -37,6 +38,7 @@
     "@intlify/unplugin-vue-i18n": "^11.0.0",
     "@quasar/app-vite": "^2.5.1",
     "@types/node": "^22.19.11",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.27",
     "electron": "^42.0.0",
     "electron-builder": "^25.1.8",

@@ -92,6 +92,24 @@ function broadcastChange(s: FaceplateSettingsT, changedKeys: string[]): void {
       win.webContents.send(IPC.settings.changed, { settings: s, keys: changedKeys });
     }
   }
+  for (const cb of mainListeners) {
+    try {
+      cb(s, changedKeys);
+    } catch (err) {
+      console.warn('[settings] main listener threw:', err);
+    }
+  }
+}
+
+type SettingsListener = (settings: FaceplateSettingsT, changedKeys: string[]) => void;
+const mainListeners = new Set<SettingsListener>();
+
+/** Subscribe (in main process) to settings changes. Returns an unsubscribe
+ * function. Used by long-lived bridges (agent-push, etc.) that need to
+ * react to user-toggled settings without polling. */
+export function onSettingsChanged(cb: SettingsListener): () => void {
+  mainListeners.add(cb);
+  return () => mainListeners.delete(cb);
 }
 
 function flattenChangedKeys(

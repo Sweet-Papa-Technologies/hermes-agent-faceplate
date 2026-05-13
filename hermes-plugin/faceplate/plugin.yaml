@@ -1,0 +1,47 @@
+# Faceplate platform plugin for HermesAgent.
+#
+# Registers a "faceplate" platform adapter that opens a WebSocket server.
+# Hermes' cron + autonomous send_message_tool + webhook fan-out all route
+# unprompted/agent-initiated messages through this adapter, which pushes
+# them as JSON frames to any connected Faceplate (Electron) client.
+#
+# Install:
+#   1. Copy this directory to ~/.hermes/plugins/faceplate/
+#   2. Add to ~/.hermes/.env:
+#        FACEPLATE_API_KEY=<random secret, share with the Faceplate>
+#        FACEPLATE_HOME_CHANNEL=default
+#        FACEPLATE_PORT=8643
+#   3. Restart the Hermes gateway.
+#
+# Usage from cron jobs (~/.hermes/cron/<job>.yaml):
+#   deliver: faceplate
+#   chat_id: ${FACEPLATE_HOME_CHANNEL}
+#
+# Reference: docs/v1/research/phase6-hermes-push.md
+
+name: faceplate
+version: 1.0.0
+author: HermesAgent Faceplate
+license: MIT
+description: |
+  Outbound channel for the HermesAgent Faceplate desktop app. Exposes a
+  WebSocket server (default port 8643) that the Faceplate connects to;
+  every adapter.send() pushes a JSON frame to all matching subscribers.
+  Authenticated via FACEPLATE_API_KEY bearer token on the WS handshake.
+
+# Tells the cron scheduler that a job with `deliver: faceplate` is valid
+# whenever this env var is non-empty (the value becomes the default
+# chat_id when the job omits one). Same convention as the built-in
+# telegram / discord adapters.
+cron_deliver_env_var: FACEPLATE_HOME_CHANNEL
+
+# Env vars the user is expected to set in ~/.hermes/.env. Hermes' loader
+# uses this to gate the adapter — it only spins up when all required vars
+# have non-empty values. FACEPLATE_API_KEY is required (we won't accept
+# unauthenticated connections); FACEPLATE_HOME_CHANNEL gives cron a
+# default chat_id; FACEPLATE_PORT is optional (defaults to 8643).
+required_env:
+  - FACEPLATE_API_KEY
+optional_env:
+  - FACEPLATE_HOME_CHANNEL
+  - FACEPLATE_PORT
