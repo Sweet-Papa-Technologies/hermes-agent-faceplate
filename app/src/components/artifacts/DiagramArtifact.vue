@@ -2,8 +2,20 @@
   <div class="diagram-artifact">
     <div ref="hostEl" class="diagram-host" v-show="!error" />
     <div v-if="error" class="diagram-fallback">
-      <div class="diagram-error">{{ error }}</div>
-      <pre class="diagram-source"><code>{{ artifact.body }}</code></pre>
+      <div class="diagram-error">
+        <span v-if="fixing" class="diagram-fix-spinner" aria-hidden="true" />
+        <span>{{ fixing ? `Fixing diagram automatically (attempt ${fixAttempts}/${MAX_FIX_ATTEMPTS})…` : error }}</span>
+      </div>
+      <!-- Manual escape hatch only appears after auto-attempts run out. -->
+      <div v-if="!fixing && fixAttempts >= MAX_FIX_ATTEMPTS" class="diagram-fix-actions">
+        <button class="diagram-fix-btn" @click="manualRetry">
+          ✨ Try AI fix again
+        </button>
+        <span class="diagram-fix-spent">
+          Or regenerate from chat — the source is shown below for reference.
+        </span>
+      </div>
+      <pre v-if="!fixing && fixAttempts >= MAX_FIX_ATTEMPTS" class="diagram-source"><code>{{ artifact.body }}</code></pre>
     </div>
   </div>
 </template>
@@ -48,8 +60,53 @@ async function render(): Promise<void> {
   }
 }
 
+// AI auto-fix bookkeeping. Runs automatically on render error — no click
+// required. Bounded so a flaky model can't burn budget; after auto-
+// attempts are exhausted, the user sees the source pane + one optional
+// manual retry button.
+const MAX_FIX_ATTEMPTS = 2;
+const fixing = ref(false);
+const fixAttempts = ref(0);
+
+// Auto-fire whenever an error appears and we still have budget. Fires
+// again automatically if the post-fix render also errors.
+watch(error, async (next) => {
+  if (!next) return;
+  if (fixing.value) return;
+  if (fixAttempts.value >= MAX_FIX_ATTEMPTS) return;
+  await runFix();
+});
+
+async function runFix(): Promise<void> {
+  if (!error.value) return;
+  fixing.value = true;
+  fixAttempts.value += 1;
+  try {
+    const corrected = await window.faceplate?.artifactFix.fix({
+      kind: 'diagram',
+      body: props.artifact.body,
+      error: error.value,
+    });
+    if (!corrected) return;
+    const updated = await window.faceplate?.artifacts.updateBody(props.artifact.id, corrected);
+    if (updated) await render();
+  } finally {
+    fixing.value = false;
+  }
+}
+
+async function manualRetry(): Promise<void> {
+  if (fixing.value) return;
+  fixAttempts.value = Math.max(0, MAX_FIX_ATTEMPTS - 1);
+  await runFix();
+}
+
 onMounted(() => void render());
-watch(() => props.artifact.id, () => void render());
+watch(() => props.artifact.id, () => {
+  fixAttempts.value = 0;
+  fixing.value = false;
+  void render();
+});
 </script>
 
 <style scoped>
@@ -83,6 +140,49 @@ watch(() => props.artifact.id, () => void render());
   border: 1px solid rgba(255, 156, 156, 0.25);
   padding: 8px 12px;
   border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.diagram-fix-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(127, 220, 255, 0.25);
+  border-top-color: #7fdcff;
+  border-radius: 50%;
+  animation: diagram-spin 700ms linear infinite;
+  flex-shrink: 0;
+}
+@keyframes diagram-spin {
+  to { transform: rotate(360deg); }
+}
+.diagram-fix-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.diagram-fix-btn {
+  background: linear-gradient(135deg, rgba(127, 220, 255, 0.22), rgba(168, 85, 247, 0.22));
+  border: 1px solid rgba(127, 220, 255, 0.45);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font: 600 12px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  transition: transform 100ms ease, border-color 100ms ease, opacity 100ms ease;
+}
+.diagram-fix-btn:hover:not(:disabled) {
+  transform: scale(1.03);
+  border-color: rgba(127, 220, 255, 0.7);
+}
+.diagram-fix-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.diagram-fix-spent {
+  font: 11px/1.3 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.55);
 }
 .diagram-source {
   margin: 0;

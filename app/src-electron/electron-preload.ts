@@ -120,6 +120,20 @@ const platform: FaceplatePreload['platform'] = {
   openExternal: (url: string) => ipcRenderer.invoke(IPC.platform.openExternal, url),
 };
 
+const notify: FaceplatePreload['notify'] = {
+  show: (opts) => ipcRenderer.invoke(IPC.notify.show, opts),
+  onClicked: (cb) => {
+    const listener = (_e: unknown, id: string) => cb(id);
+    ipcRenderer.on(IPC.notify.clicked, listener);
+    return () => ipcRenderer.removeListener(IPC.notify.clicked, listener);
+  },
+  onReplied: (cb) => {
+    const listener = (_e: unknown, id: string, text: string) => cb(id, text);
+    ipcRenderer.on(IPC.notify.replied, listener);
+    return () => ipcRenderer.removeListener(IPC.notify.replied, listener);
+  },
+};
+
 const typingBar: FaceplatePreload['typingBar'] = {
   submit: (text: string) => ipcRenderer.send(IPC.typingBar.submit, text),
   cancel: () => ipcRenderer.send(IPC.typingBar.cancel),
@@ -192,6 +206,8 @@ const artifacts: FaceplatePreload['artifacts'] = {
     ipcRenderer.invoke(IPC.artifacts.resolveUrl, id),
   download: (id: string) => ipcRenderer.invoke(IPC.artifacts.download, id),
   openCanvas: (id?: string) => ipcRenderer.invoke(IPC.artifacts.openCanvas, id),
+  updateBody: (id: string, body: string) =>
+    ipcRenderer.invoke(IPC.artifacts.updateBody, id, body),
   onChanged: (cb) => {
     const listener = (
       _e: unknown,
@@ -207,6 +223,10 @@ const artifacts: FaceplatePreload['artifacts'] = {
   },
 };
 
+const artifactFix: FaceplatePreload['artifactFix'] = {
+  fix: (input) => ipcRenderer.invoke(IPC.artifactFix.fix, input),
+};
+
 const api: FaceplatePreload = {
   settings,
   hermes,
@@ -217,9 +237,11 @@ const api: FaceplatePreload = {
   themes,
   events,
   platform,
+  notify,
   typingBar,
   conversations,
   artifacts,
+  artifactFix,
 };
 
 contextBridge.exposeInMainWorld('faceplate', api);

@@ -229,6 +229,25 @@ export function createArtifact(input: CreateArtifactInput): Artifact {
   return a;
 }
 
+/** Update an artifact's inline body in place. Used by the AI auto-fix
+ * flow when the user clicks "Fix with AI" on a broken chart/diagram —
+ * the corrected body persists so reloading the canvas shows the fix.
+ * Only inline-stored bodies are supported; file-stored bodies (images,
+ * audio) shouldn't be rewritten this way. */
+export function updateArtifactBody(id: string, newBody: string): Artifact | null {
+  const existing = getArtifact(id);
+  if (!existing) return null;
+  if (existing.body_storage !== 'inline') {
+    console.warn(`[artifacts] updateArtifactBody: refusing to rewrite non-inline body for ${id}`);
+    return null;
+  }
+  const updated: Artifact = { ...existing, body: newBody };
+  saveArtifact(updated);
+  syncManifestEntry(updated);
+  broadcast(IPC.artifacts.changed, { id, artifact: updated });
+  return updated;
+}
+
 export function deleteArtifact(id: string): void {
   const m = getManifest();
   m.artifacts = m.artifacts.filter((a) => a.id !== id);
@@ -311,6 +330,9 @@ export function registerArtifactsIpc(): void {
   ipcMain.handle(IPC.artifacts.get, (_e, id: string) => getArtifact(id));
   ipcMain.handle(IPC.artifacts.create, (_e, input: CreateArtifactInput) => createArtifact(input));
   ipcMain.handle(IPC.artifacts.delete, (_e, id: string) => deleteArtifact(id));
+  ipcMain.handle(IPC.artifacts.updateBody, (_e, id: string, body: string) =>
+    updateArtifactBody(id, body),
+  );
   ipcMain.handle(IPC.artifacts.resolveUrl, (_e, id: string) => {
     const a = loadArtifact(id);
     return a ? resolveBodyUrl(a) : null;

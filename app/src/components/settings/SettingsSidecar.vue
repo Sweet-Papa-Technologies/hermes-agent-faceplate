@@ -36,7 +36,39 @@
 
     <h3>Text-to-speech</h3>
     <q-card flat bordered class="card">
-      <q-card-section class="row q-col-gutter-md">
+      <q-card-section>
+        <div class="q-mb-sm" style="font-size: 12px; color: rgba(0,0,0,0.65);">Engine</div>
+        <q-option-group v-model="ttsEngine" type="radio" :options="engineOptions" inline />
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="ttsEngine === 'kokoro'" class="row q-col-gutter-md">
+        <q-input
+          v-model="kokoroUrl"
+          class="col-12"
+          label="Kokoro FastAPI URL"
+          filled
+          stack-label
+          hint="Default: http://127.0.0.1:8880 — start with `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest`."
+        />
+        <q-select
+          v-model="kokoroVoice"
+          :options="kokoroVoiceOptions"
+          class="col-12"
+          label="Voice"
+          stack-label
+          filled
+          use-input
+          new-value-mode="add-unique"
+          emit-value
+          map-options
+          hint="A-grade English voices recommended (af_*, am_*, bf_*, bm_*). Full list at hexgrad/Kokoro-82M/VOICES.md."
+        />
+        <div class="col-12">
+          <div>Rate ({{ ttsRate.toFixed(2) }}x)</div>
+          <q-slider v-model="ttsRate" :min="0.5" :max="2.0" :step="0.05" />
+        </div>
+      </q-card-section>
+      <q-card-section v-else class="row q-col-gutter-md">
         <q-select
           v-model="ttsVoice"
           :options="voiceOptions"
@@ -56,13 +88,13 @@
           <q-slider v-model="ttsRate" :min="0.5" :max="2.0" :step="0.05" />
         </div>
         <q-expansion-item icon="tune" label="Advanced" class="col-12" header-class="text-grey-7" dense>
-          <q-select v-model="ttsModel" :options="ttsModelOptions" label="Model id" filled stack-label use-input new-value-mode="add-unique" :loading="loadingDiscovery" emit-value map-options class="q-mt-sm" hint="Auto-derived from the voice (piper:&lt;voice&gt;). Override only if you've added a custom backend (e.g. kokoro:…)." />
+          <q-select v-model="ttsModel" :options="ttsModelOptions" label="Model id" filled stack-label use-input new-value-mode="add-unique" :loading="loadingDiscovery" emit-value map-options class="q-mt-sm" hint="Auto-derived from the voice (piper:&lt;voice&gt;). Override only if you've added a custom backend." />
           <q-select v-model="ttsFormat" :options="formatOptions" label="Stream format (MSE)" filled stack-label emit-value map-options class="q-mt-sm" />
         </q-expansion-item>
       </q-card-section>
       <q-card-actions>
         <TestConnectionButton target="tts" label="Test TTS" />
-        <q-btn flat dense no-caps icon="refresh" label="Refresh from sidecar" :loading="loadingDiscovery" @click="refreshDiscovery" />
+        <q-btn v-if="ttsEngine === 'piper'" flat dense no-caps icon="refresh" label="Refresh from sidecar" :loading="loadingDiscovery" @click="refreshDiscovery" />
       </q-card-actions>
     </q-card>
 
@@ -163,8 +195,28 @@ const mode = useSetting('speech.sidecar_mode');
 const url = useSetting('speech.sidecar_url');
 const token = useSetting('speech.sidecar_token');
 const image = useSetting('speech.sidecar_image');
+const ttsEngine = useSetting('speech.tts.engine');
 const ttsModel = useSetting('speech.tts.model');
 const ttsVoice = useSetting('speech.tts.voice');
+const kokoroUrl = useSetting('speech.tts.kokoro_url');
+const kokoroVoice = useSetting('speech.tts.kokoro_voice');
+
+const engineOptions = [
+  { label: 'Piper (bundled, fast, basic prosody)', value: 'piper' },
+  { label: 'Kokoro (separate sidecar, higher-quality voices)', value: 'kokoro' },
+];
+
+// Hard-coded shortlist of the most useful Kokoro voices. Users can still
+// type any voice id thanks to use-input + new-value-mode="add-unique".
+const kokoroVoiceOptions = [
+  { label: 'af_bella — American female (A grade)', value: 'af_bella' },
+  { label: 'af_heart — American female (A grade)', value: 'af_heart' },
+  { label: 'af_nicole — American female (B grade)', value: 'af_nicole' },
+  { label: 'am_adam — American male (B grade)', value: 'am_adam' },
+  { label: 'am_michael — American male (B grade)', value: 'am_michael' },
+  { label: 'bf_emma — British female (B grade)', value: 'bf_emma' },
+  { label: 'bm_george — British male (B grade)', value: 'bm_george' },
+];
 
 // Auto-derive model id from the voice id. The model is just a backend tag —
 // for Piper it's always `piper:<voice>`. Users almost never need to change

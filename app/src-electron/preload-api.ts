@@ -54,6 +54,25 @@ export interface HermesLocalConfig {
   };
 }
 
+/** Payload for `faceplate:notify:show`. Kept tight on purpose — the main
+ * process owns formatting, sound choice, click routing, and dedup. */
+export interface NotifyOptions {
+  /** Caller-controlled id. Used for dedup (calling show with the same id
+   * closes the previous notification first) and for click/reply routing. */
+  id: string;
+  title: string;
+  body: string;
+  /** What kind of event this is — drives click-to-focus routing in main.
+   *   - 'response_complete': agent finished a turn → focus the avatar
+   *   - 'agent_initiated':   unprompted message (Phase 6) → focus avatar
+   *   - 'system':            misc app-level alert → focus most-recent window */
+  kind?: 'response_complete' | 'agent_initiated' | 'system';
+  /** macOS-only: enable inline reply UI on the notification. Sends back
+   * via onReplied. Ignored on Windows/Linux. */
+  hasReply?: boolean;
+  replyPlaceholder?: string;
+}
+
 /**
  * Discovery is split into two independent halves:
  *
@@ -230,6 +249,19 @@ export interface FaceplatePreload {
      * silently dropped. */
     openExternal(url: string): Promise<void>;
   };
+  notify: {
+    /** Fire an OS notification. The main process gates on settings
+     * (enabled, mode, DND hours, foregrounded suppression) — callers don't
+     * need to check those themselves. Returns the notification id (the
+     * caller can use it for dedup/replay). */
+    show(opts: NotifyOptions): Promise<string | null>;
+    /** Subscribe to click events on notifications fired by this app.
+     * Receives the id passed in show(). */
+    onClicked(cb: (id: string) => void): () => void;
+    /** macOS-only: subscribe to the inline-reply text the user types in
+     * a notification with `hasReply: true`. Phase 6 quick-reply UX. */
+    onReplied(cb: (id: string, text: string) => void): () => void;
+  };
   typingBar: {
     /** Sent by the standalone typing window when the user hits Enter. */
     submit(text: string): void;
@@ -278,12 +310,26 @@ export interface FaceplatePreload {
     download(id: string): Promise<{ ok: boolean; path?: string }>;
     /** Open the canvas window. If `id` is provided, focuses that artifact. */
     openCanvas(id?: string): Promise<void>;
+    /** Replace the inline body of an existing artifact in place. Used by
+     * the AI auto-fix flow when a chart/diagram fails to render and the
+     * user clicks "Fix with AI" — the corrected body persists. Returns
+     * the updated artifact, or null if the id wasn't found / wasn't
+     * inline-stored. */
+    updateBody(id: string, body: string): Promise<Artifact | null>;
     /** Subscribe to artifact create/delete broadcasts. */
     onChanged(
       cb: (msg: { id: string; artifact: Artifact | null }) => void,
     ): () => void;
     /** Canvas window subscribes to focus-this-artifact pings from main. */
     onFocus(cb: (id: string) => void): () => void;
+  };
+  /** AI auto-fix for broken artifacts. The main process calls the
+   * underlying LLM directly (same readLlmEndpoint() bypass as paraphrase)
+   * with a strict prompt: "here is broken {kind}, here is the error,
+   * return ONLY the corrected raw body." Returns the corrected string
+   * or null if the LLM was unreachable / returned junk. */
+  artifactFix: {
+    fix(input: { kind: string; body: string; error: string }): Promise<string | null>;
   };
 }
 
@@ -342,6 +388,11 @@ export const IPC = {
     publish: 'faceplate:events:publish',
     broadcast: 'faceplate:events:broadcast',
   },
+  notify: {
+    show: 'faceplate:notify:show',
+    clicked: 'faceplate:notify:clicked',
+    replied: 'faceplate:notify:replied',
+  },
   platform: {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',
     relaunch: 'faceplate:platform:relaunch',
@@ -378,7 +429,11 @@ export const IPC = {
     resolveUrl: 'faceplate:artifacts:resolve-url',
     download: 'faceplate:artifacts:download',
     openCanvas: 'faceplate:artifacts:open-canvas',
+    updateBody: 'faceplate:artifacts:update-body',
     changed: 'faceplate:artifacts:changed',
     focus: 'faceplate:artifacts:focus',
+  },
+  artifactFix: {
+    fix: 'faceplate:artifact-fix:fix',
   },
 } as const;

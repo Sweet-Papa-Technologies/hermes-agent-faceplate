@@ -100,11 +100,26 @@ export const ParaphraseSettings = z.object({
 });
 
 export const TtsSettings = z.object({
+  /** Which TTS engine to call. 'piper' keeps the existing bundled-sidecar
+   * path (model + voice fields below). 'kokoro' routes to a separate
+   * kokoro-fastapi instance (default localhost:8880) using
+   * kokoro_voice + 'kokoro' as the model id. Both engines speak the same
+   * OpenAI-compatible /v1/audio/speech wire format, so the renderer's
+   * MSE streaming pipeline is unchanged. */
+  engine: z.enum(['piper', 'kokoro']).default('piper'),
   model: z.string().default('piper:en_US-amy-medium'),
   voice: z.string().default('en_US-amy-medium'),
   rate: z.number().positive().default(1.0),
   // Addendum #1: pinned to MP3 for v1 (MSE).
   format: z.enum(['mp3', 'opus', 'wav', 'aac']).default('mp3'),
+  /** Base URL of the Kokoro FastAPI sidecar (or any OpenAI-compat server
+   * that exposes /v1/audio/speech with the Kokoro model). Used only when
+   * engine === 'kokoro'. */
+  kokoro_url: z.string().url().default('http://127.0.0.1:8880'),
+  /** Kokoro voice id (see VOICES.md in hexgrad/Kokoro-82M). 'af_*' = American
+   * female, 'am_*' = American male, etc. A-grade English voices are
+   * generally the best quality. */
+  kokoro_voice: z.string().default('af_bella'),
 });
 
 export const AsrSettings = z.object({
@@ -218,6 +233,22 @@ export const ArtifactsSettings = z.object({
   eagerness: z.enum(['subtle', 'balanced', 'liberal', 'aggressive']).default('balanced'),
 });
 
+export const NotificationsSettings = z.object({
+  /** Master toggle. When false, no OS notifications fire regardless of mode. */
+  enabled: z.boolean().default(true),
+  /** Play OS notification sound. macOS uses the system default; Linux/Win
+   * follow `urgency`. */
+  sound: z.boolean().default(true),
+  /** When to fire notifications:
+   *   - 'always'              — every assistant turn completion
+   *   - 'backgrounded_only'   — only when no Faceplate window is focused
+   *                             (avoid double-cueing while user is reading) */
+  mode: z.enum(['always', 'backgrounded_only']).default('backgrounded_only'),
+  /** Do-not-disturb window. HH:mm 24h. Equal start+end disables DND. */
+  dnd_start: z.string().regex(/^\d{2}:\d{2}$/).default('22:00'),
+  dnd_end: z.string().regex(/^\d{2}:\d{2}$/).default('08:00'),
+});
+
 export const LinuxSettings = z.object({
   // Only consulted when XDG_SESSION_TYPE === 'wayland'. Requires app restart
   // to take effect (sets ozone-platform=x11 before app.whenReady()).
@@ -236,6 +267,7 @@ export const FaceplateSettings = z.object({
   hermes: HermesSettings.default({}),
   paraphrase: ParaphraseSettings.default({}),
   speech: SpeechSettings.default({}),
+  notifications: NotificationsSettings.default({}),
   input: InputSettings.default({}),
   output: OutputSettings.default({}),
   hotkeys: HotkeysSettings.default({}),
@@ -257,6 +289,7 @@ export type HotkeysSettings = z.infer<typeof HotkeysSettings>;
 export type PrivacySettings = z.infer<typeof PrivacySettings>;
 export type ArtifactsSettings = z.infer<typeof ArtifactsSettings>;
 export type LinuxSettings = z.infer<typeof LinuxSettings>;
+export type NotificationsSettings = z.infer<typeof NotificationsSettings>;
 
 export function defaultSettings(): FaceplateSettings {
   return FaceplateSettings.parse({});

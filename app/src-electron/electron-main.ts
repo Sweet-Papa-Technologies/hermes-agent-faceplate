@@ -33,6 +33,8 @@ import { registerHookIpc } from './hook-installer';
 import { startHookListener, stopHookListener } from './hook-listener';
 import { registerEventBridgeIpc } from './event-bridge';
 import { registerPlatformIpc } from './platform-bridge';
+import { registerNotificationsIpc } from './notifications-bridge';
+import { registerArtifactFixIpc } from './artifact-fix-bridge';
 import {
   ensureBootstrapConversation,
   registerConversationsIpc,
@@ -229,6 +231,17 @@ const platform = process.platform || os.platform();
 
 applyEarlyPlatformFlags();
 
+// Windows: must be set BEFORE any window is created or notifications fire,
+// otherwise OS notifications silently no-op (per Electron docs + research
+// brief docs/v1/research/phase4-electron-notifications.md). Squirrel sets
+// this in production; in dev we set it manually here. Match the value
+// across both `app.setName` and `setAppUserModelId` so Linux desktop file
+// `Name=` lookups also resolve correctly.
+app.setName('HermesAgent Faceplate');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.hermesagent.faceplate');
+}
+
 void app.whenReady().then(() => {
   registerSettingsIpc();
   registerWindowIpc();
@@ -241,8 +254,10 @@ void app.whenReady().then(() => {
   registerHookIpc();
   registerEventBridgeIpc();
   registerPlatformIpc();
+  registerNotificationsIpc();
   registerConversationsIpc();
   registerArtifactsIpc();
+  registerArtifactFixIpc();
 
   // Catch every webContents (avatar, canvas, settings, …) and route any
   // attempt to open a new window — `target="_blank"`, `window.open()`, or

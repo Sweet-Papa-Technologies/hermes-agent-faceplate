@@ -599,20 +599,33 @@ async function speakAndAnimate(
     return;
   }
 
-  const ttsBaseUrl = `${speech.sidecar_url.replace(/\/$/, '')}/v1`;
+  // Engine choice gates which sidecar URL + voice/model we hit. Both engines
+  // speak OpenAI-compatible /v1/audio/speech, so the rest of the pipeline
+  // (MSE, viseme analyser, sink-id) is engine-agnostic.
+  const useKokoro = speech.tts.engine === 'kokoro';
+  const ttsBaseUrl = useKokoro
+    ? `${speech.tts.kokoro_url.replace(/\/$/, '')}/v1`
+    : `${speech.sidecar_url.replace(/\/$/, '')}/v1`;
+  const ttsVoice = useKokoro ? speech.tts.kokoro_voice : speech.tts.voice;
+  // Kokoro-FastAPI's model id is just "kokoro" (or OpenAI aliases tts-1 /
+  // tts-1-hd). We pin to "kokoro" since that selects the bundled weights.
+  const ttsModel = useKokoro ? 'kokoro' : speech.tts.model;
+  // Kokoro sidecar is unauthenticated by default; only forward the token
+  // for the bundled Piper sidecar.
+  const ttsApiKey = useKokoro ? undefined : (speech.sidecar_token || undefined);
 
   const sid = ++speakCount;
-  console.log(`[turn] speakStream #${sid} START voice="${speech.tts.voice}" model="${speech.tts.model}" len=${text.length} active===handle? ${active === handle}`);
+  console.log(`[turn] speakStream #${sid} START engine=${speech.tts.engine} voice="${ttsVoice}" model="${ttsModel}" len=${text.length} active===handle? ${active === handle}`);
   let speak: SpeakHandle;
   try {
     const outputDeviceId = settings.settings.output.device_id;
     speak = speakStream({
       baseUrl: ttsBaseUrl,
-      ...(speech.sidecar_token ? { apiKey: speech.sidecar_token } : {}),
+      ...(ttsApiKey ? { apiKey: ttsApiKey } : {}),
       request: {
         input: text,
-        voice: speech.tts.voice,
-        model: speech.tts.model,
+        voice: ttsVoice,
+        model: ttsModel,
         speed: speech.tts.rate,
       },
       format: speech.tts.format,
@@ -625,7 +638,7 @@ async function speakAndAnimate(
           type: 'tts.audio.start',
           ts: Date.now(),
           payload: {
-            voice: speech.tts.voice,
+            voice: ttsVoice,
             mime: mimeFor(speech.tts.format),
             format: speech.tts.format,
           },
@@ -650,6 +663,20 @@ async function speakAndAnimate(
   if (active !== handle) return;
   convo.finalizeTurn();
   if (reason !== 'interrupt') agent.transition('idle', `tts.${reason}`);
+
+  // Notify on natural completion only — interrupt/error paths shouldn't
+  // ping the user. Main-process bridge gates on settings (enabled, mode,
+  // DND, foregrounded suppression) so callers don't need to.
+  if (reason === 'natural' && convo.lastAssistant) {
+    const last = convo.lastAssistant;
+    const preview = last.text.replace(/\s+/g, ' ').trim().slice(0, 140);
+    void window.faceplate?.notify.show({
+      id: `turn:${last.id}`,
+      title: 'Hermes finished responding',
+      body: preview || '(empty response)',
+      kind: 'response_complete',
+    });
+  }
 }
 
 // ------------------------------------------------------------------ helpers
