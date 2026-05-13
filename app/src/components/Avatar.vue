@@ -215,6 +215,20 @@ onBeforeUnmount(() => {
   filter: var(--faceplate-card, none);
   /* Anchor for the HUD's absolute-positioned buttons. */
   position: relative;
+  /* Hover background — invisible by default, soft halo on hover so the user
+   * gets visual confirmation the avatar is interactive, while the rest of
+   * the time the overlay stays purely transparent. */
+  transition: background 220ms ease, box-shadow 220ms ease;
+  border-radius: 50%;
+}
+.avatar-root:hover {
+  background: radial-gradient(
+    circle at center,
+    rgba(127, 220, 255, 0.18) 0%,
+    rgba(127, 220, 255, 0.08) 55%,
+    transparent 75%
+  );
+  box-shadow: 0 0 24px rgba(127, 220, 255, 0.18) inset;
 }
 
 :root[data-mode='windowed'] .avatar-root {

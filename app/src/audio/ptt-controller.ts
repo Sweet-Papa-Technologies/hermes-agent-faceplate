@@ -104,7 +104,24 @@ async function start(): Promise<void> {
 
   log('start: opening mic…');
   try {
-    const next = await startAsrSession({ endpoint });
+    // 'system' is the sentinel for "let the OS pick"; we omit deviceId so
+    // getUserMedia falls back to the user's default. A persisted explicit
+    // deviceId may not be present this session (USB headset unplugged) —
+    // startAsrSession's getUserMedia will throw NotFoundError; we don't
+    // overwrite the saved value, so re-plugging restores the original choice.
+    const savedId = settings.settings.input.device_id;
+    const deviceId = savedId && savedId !== 'system' ? savedId : undefined;
+    let next: Awaited<ReturnType<typeof startAsrSession>>;
+    try {
+      next = await startAsrSession(deviceId ? { endpoint, deviceId } : { endpoint });
+    } catch (err) {
+      if (deviceId && err instanceof Error && /NotFoundError|OverconstrainedError/.test(err.name)) {
+        log(`saved deviceId '${deviceId.slice(0, 8)}…' unavailable, retrying with system default`);
+        next = await startAsrSession({ endpoint });
+      } else {
+        throw err;
+      }
+    }
     session = next;
     agent.transition('listening', 'ptt');
     log('start: recording');

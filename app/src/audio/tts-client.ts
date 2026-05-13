@@ -31,6 +31,11 @@ export interface SpeakOptions {
   request: TtsRequest;
   format?: TtsFormat;       // default 'mp3'
   signal?: AbortSignal;
+  /** Output sink (speaker) deviceId. Omit / empty / 'system' → OS default.
+   * Applied via HTMLMediaElement.setSinkId(); silently no-ops on macOS
+   * Chromium without entitlements and on browsers that don't support sink
+   * selection. Failure to set the sink never blocks playback. */
+  outputDeviceId?: string;
   /** Called once after the AnalyserNode is attached, before audio starts. */
   onAnalyser?: (analyser: AnalyserNode) => void;
   /** Called when the very first chunk has been fed into the SourceBuffer. */
@@ -70,6 +75,20 @@ export function speakStream(opts: SpeakOptions): SpeakHandle {
   const audio = new Audio();
   audio.preload = 'auto';
   audio.crossOrigin = 'anonymous';
+
+  // Apply user-chosen speaker device. setSinkId is async + may reject; we
+  // log + ignore so a missing sink (USB DAC unplugged) never blocks TTS —
+  // the audio just plays through the OS default sink for this turn.
+  if (opts.outputDeviceId && opts.outputDeviceId !== 'system') {
+    type AudioWithSinkId = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+    const setSinkId = (audio as AudioWithSinkId).setSinkId;
+    if (typeof setSinkId === 'function') {
+      void setSinkId.call(audio, opts.outputDeviceId).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[tts] setSinkId('${opts.outputDeviceId?.slice(0, 8)}…') failed, using OS default: ${msg}`);
+      });
+    }
+  }
 
   const ctx = getAudioContext();
   const sourceNode = ctx.createMediaElementSource(audio);

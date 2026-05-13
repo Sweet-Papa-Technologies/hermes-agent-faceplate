@@ -17,6 +17,7 @@
           option-value="deviceId"
           emit-value
           map-options
+          :hint="inputHint"
         />
       </q-card-section>
       <q-separator />
@@ -67,19 +68,20 @@
 import { ref, computed, onMounted, watchEffect } from 'vue';
 
 import { useSetting } from '../../composables/use-setting';
+import { SYSTEM_DEFAULT_DEVICE } from '../../stores/settings-schema';
 
 interface DeviceOption {
   deviceId: string;
   label: string;
 }
 
-const inputDeviceId = ref<string>('');
-const outputDeviceId = ref<string>('');
-// These are not yet persisted to settings.yaml — Phase 4 stores them in
-// memory; persistence comes when the audio pipeline reads from settings
-// directly (Phase 2 already plumbs `deviceId` through, just not from disk).
-
-const _inputDeviceSetting = useSetting('input.mode'); // satisfy import bias
+// Persisted via settings.yaml. 'system' is the default sentinel meaning
+// "follow OS default device." When the user picks an explicit device that
+// later disappears (USB headset unplugged), we don't clobber the saved
+// value — the audio pipeline transparently falls back to the OS default
+// for that session, so re-plugging the device restores it automatically.
+const inputDeviceId = useSetting('input.device_id');
+const outputDeviceId = useSetting('output.device_id');
 
 const inputDevices = ref<MediaDeviceInfo[]>([]);
 const outputDevices = ref<MediaDeviceInfo[]>([]);
@@ -96,12 +98,19 @@ function labelFor(d: MediaDeviceInfo, kindFallback: string): string {
   return `${kindFallback} ${d.deviceId.slice(0, 6)}`;
 }
 
-const inputOptions = computed<DeviceOption[]>(() =>
-  inputDevices.value.map((d) => ({ deviceId: d.deviceId, label: labelFor(d, 'microphone') })),
-);
-const outputOptions = computed<DeviceOption[]>(() =>
-  outputDevices.value.map((d) => ({ deviceId: d.deviceId, label: labelFor(d, 'output') })),
-);
+const SYSTEM_OPTION: DeviceOption = {
+  deviceId: SYSTEM_DEFAULT_DEVICE,
+  label: '🔊 System Setting (follow OS default)',
+};
+
+const inputOptions = computed<DeviceOption[]>(() => [
+  SYSTEM_OPTION,
+  ...inputDevices.value.map((d) => ({ deviceId: d.deviceId, label: labelFor(d, 'microphone') })),
+]);
+const outputOptions = computed<DeviceOption[]>(() => [
+  SYSTEM_OPTION,
+  ...outputDevices.value.map((d) => ({ deviceId: d.deviceId, label: labelFor(d, 'output') })),
+]);
 
 const outputHint = computed(() =>
   isMacOs.value
@@ -109,30 +118,23 @@ const outputHint = computed(() =>
     : 'Used for TTS playback.',
 );
 
-function pickDefault(devices: MediaDeviceInfo[]): string {
-  // Chromium exposes a synthetic entry with deviceId="default" pointing at
-  // whatever the OS currently considers the default. If that's missing
-  // (Firefox, some ALSA setups) fall back to the first real device.
-  const def = devices.find((d) => d.deviceId === 'default');
-  if (def) return def.deviceId;
-  const real = devices.find((d) => d.deviceId && d.deviceId !== '');
-  return real?.deviceId ?? '';
-}
+const inputHint = computed(() => {
+  // Surface a quiet warning if the saved device isn't currently present —
+  // the pipeline will fall back to OS default this session, but the user
+  // should know nothing is broken.
+  if (inputDeviceId.value === SYSTEM_DEFAULT_DEVICE) return '';
+  if (inputDevices.value.length === 0) return '';
+  const present = inputDevices.value.some((d) => d.deviceId === inputDeviceId.value);
+  return present
+    ? ''
+    : 'Saved device is not currently connected — falling back to System Setting until it returns.';
+});
 
 async function refreshDevices(): Promise<void> {
   try {
     const all = await navigator.mediaDevices.enumerateDevices();
     inputDevices.value = all.filter((d) => d.kind === 'audioinput');
     outputDevices.value = all.filter((d) => d.kind === 'audiooutput');
-    // Auto-select whatever the OS reports as default, but only if the user
-    // hasn't explicitly chosen something — preserves manual overrides
-    // across re-enumerations (e.g., when a USB headset is plugged in).
-    if (!inputDeviceId.value || !inputDevices.value.some((d) => d.deviceId === inputDeviceId.value)) {
-      inputDeviceId.value = pickDefault(inputDevices.value);
-    }
-    if (!outputDeviceId.value || !outputDevices.value.some((d) => d.deviceId === outputDeviceId.value)) {
-      outputDeviceId.value = pickDefault(outputDevices.value);
-    }
   } catch (err) {
     console.error('[settings.audio] enumerateDevices failed:', err);
   }

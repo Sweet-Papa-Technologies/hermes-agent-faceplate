@@ -82,9 +82,11 @@ import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 
 import ArtifactRenderer from '../components/artifacts/ArtifactRenderer.vue';
 import { useArtifactsStore } from '../stores/artifacts';
+import { useConversationsStore } from '../stores/conversations';
 import type { ArtifactKind } from '../stores/artifact-types';
 
 const artifacts = useArtifactsStore();
+const convs = useConversationsStore();
 
 // ─── zoom ─────────────────────────────────────────────────────────────
 //
@@ -106,7 +108,16 @@ function clampZoom(v: number): number {
 function zoomIn():    void { zoom.value = clampZoom(zoom.value + ZOOM_STEP); }
 function zoomOut():   void { zoom.value = clampZoom(zoom.value - ZOOM_STEP); }
 function resetZoom(): void { zoom.value = 1; }
-const list = computed(() => artifacts.list);
+// Canvas window is scoped to the current conversation only — artifacts from
+// past conversations stay parked in the Conversations panel's gallery view
+// (which has an "All conversations" toggle). Without this scope, the canvas
+// kept showing artifacts from unrelated conversations next to the current
+// one in the prev/next nav, which was confusing.
+const list = computed(() => {
+  const id = convs.activeId;
+  if (!id) return artifacts.list;
+  return artifacts.list.filter((a) => a.conversation_id === id);
+});
 const active = computed(() => artifacts.active);
 
 const KIND_LABELS: Record<ArtifactKind, string> = {
@@ -242,12 +253,46 @@ onBeforeUnmount(() => {
   min-height: 0;
   background: rgba(14, 16, 22, 0.92);
   border-radius: 14px;
+  /* Heavier ambient shadow + animated rainbow ring so the canvas window is
+   * easy to spot across multi-monitor setups. The ring lives on a pseudo-
+   * element so it doesn't interfere with the card's own background. */
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.5),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(127, 220, 255, 0.18),
     0 0 0 1px rgba(255, 255, 255, 0.08) inset;
   backdrop-filter: blur(16px) saturate(120%);
   overflow: hidden;
   color: #f4f5f8;
+  position: relative;
+  z-index: 0;
+}
+.canvas-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--rainbow-angle, 0deg),
+    #ff5e7e, #ff9c4a, #ffe14a, #5ee27a, #5ec8ff, #b078ff, #ff5ec8, #ff5e7e
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  z-index: -1;
+  animation: rainbow-spin 9s linear infinite;
+  opacity: 0.6;
+  pointer-events: none;
+}
+@property --rainbow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes rainbow-spin {
+  to { --rainbow-angle: 360deg; }
 }
 
 .canvas-titlebar {

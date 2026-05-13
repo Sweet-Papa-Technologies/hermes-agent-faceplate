@@ -62,6 +62,47 @@ function computeOverlayBounds(
   }
 }
 
+/** Snap a window back into the visible work area when the user drags or
+ * resizes it mostly off-screen. Without this, dragging the title bar past
+ * the screen edge or shrinking past a monitor boundary can leave the
+ * window invisible — recoverable only by tray menu or relaunch. We
+ * intentionally allow PARTIAL off-screen (so users can park a panel at
+ * the edge) and only intervene when ≥75% of the window is hidden. */
+function attachOnScreenGuard(win: BrowserWindow): void {
+  const guard = (): void => {
+    if (win.isDestroyed()) return;
+    const bounds = win.getBounds();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const center = {
+      x: bounds.x + Math.floor(bounds.width / 2),
+      y: bounds.y + Math.floor(bounds.height / 2),
+    };
+    const display = screen.getDisplayNearestPoint(center);
+    const work = display.workArea;
+    const overlapW = Math.max(
+      0,
+      Math.min(bounds.x + bounds.width, work.x + work.width) - Math.max(bounds.x, work.x),
+    );
+    const overlapH = Math.max(
+      0,
+      Math.min(bounds.y + bounds.height, work.y + work.height) - Math.max(bounds.y, work.y),
+    );
+    const overlapArea = overlapW * overlapH;
+    const windowArea = bounds.width * bounds.height;
+    // Need at least 25% of the window OR an 80x80 patch visible — whichever
+    // is smaller. Below that, the user has effectively lost the window.
+    const minVisible = Math.min(windowArea * 0.25, 80 * 80);
+    if (overlapArea >= minVisible) return;
+    const newW = Math.min(bounds.width, work.width);
+    const newH = Math.min(bounds.height, work.height);
+    const newX = Math.max(work.x, Math.min(bounds.x, work.x + work.width - newW));
+    const newY = Math.max(work.y, Math.min(bounds.y, work.y + work.height - newH));
+    win.setBounds({ x: newX, y: newY, width: newW, height: newH }, false);
+  };
+  win.on('moved', guard);
+  win.on('resized', guard);
+}
+
 function preloadPath(): string {
   return path.resolve(
     currentDir,
@@ -119,6 +160,7 @@ function createOverlayWindow(): BrowserWindow {
   // reports per-pixel hit regions on mousemove (forward:true).
   win.setIgnoreMouseEvents(false);
 
+  attachOnScreenGuard(win);
   void loadRoute(win, '/overlay');
   return win;
 }
@@ -142,6 +184,7 @@ function createWindowedAvatarWindow(): BrowserWindow {
     },
   });
 
+  attachOnScreenGuard(win);
   void loadRoute(win, '/overlay');
   return win;
 }
@@ -267,6 +310,7 @@ export function createSettingsWindow(): BrowserWindow {
       preload: preloadPath(),
     },
   });
+  attachOnScreenGuard(settingsWindow);
   void loadRoute(settingsWindow, '/settings');
   settingsWindow.on('closed', () => {
     settingsWindow = null;
@@ -295,6 +339,7 @@ export function createWizardWindow(): BrowserWindow {
       preload: preloadPath(),
     },
   });
+  attachOnScreenGuard(wizardWindow);
   void loadRoute(wizardWindow, '/wizard');
   wizardWindow.on('closed', () => {
     wizardWindow = null;
@@ -473,6 +518,21 @@ export function registerWindowIpc(): void {
     resetAvatarSize();
   });
 
+  ipcMain.handle(IPC.window.openTypingBar, () => {
+    showTypingBarWindow();
+  });
+
+  ipcMain.handle(IPC.window.raiseAvatar, () => {
+    const win = avatarWindow;
+    if (!win || win.isDestroyed()) return;
+    // Don't steal text focus — overlay-mode avatars are click-through and
+    // shouldn't grab keyboard input from whatever the user is typing into.
+    // moveTop raises the z-order; if the window isn't visible (user
+    // dismissed it), bring it back inactive.
+    if (!win.isVisible()) win.showInactive();
+    else win.moveTop();
+  });
+
   ipcMain.on(IPC.typingBar.submit, (_evt, text: string) => {
     if (typeof text !== 'string') return;
     dispatchTypingBarSubmit(text);
@@ -552,6 +612,7 @@ export function toggleConversationPanelWindow(): void {
     conversationPanelWindow?.show();
     conversationPanelWindow?.focus();
   });
+  attachOnScreenGuard(conversationPanelWindow);
   void loadRoute(conversationPanelWindow, '/conversation');
 }
 
@@ -584,8 +645,13 @@ const CANVAS_H = 560;
 
 export function showCanvasWindow(): void {
   if (canvasWindow && !canvasWindow.isDestroyed()) {
-    if (!canvasWindow.isVisible()) canvasWindow.show();
-    canvasWindow.focus();
+    // showInactive() raises the window to the front WITHOUT stealing keyboard
+    // focus from whatever the user is typing into. Per UX spec: canvas
+    // appears when the agent generates an artifact mid-conversation, but
+    // shouldn't pull the user out of their text editor / terminal / typing
+    // bar. The user can click into the canvas if they want focus.
+    if (!canvasWindow.isVisible()) canvasWindow.showInactive();
+    else canvasWindow.moveTop();
     return;
   }
 
@@ -623,8 +689,10 @@ export function showCanvasWindow(): void {
     canvasWindow = null;
   });
   canvasWindow.once('ready-to-show', () => {
-    canvasWindow?.show();
+    // Same no-steal-focus rule on first appearance.
+    canvasWindow?.showInactive();
   });
+  attachOnScreenGuard(canvasWindow);
   void loadRoute(canvasWindow, '/canvas');
 }
 
@@ -640,6 +708,74 @@ export function hideCanvasWindow(): void {
   if (canvasWindow && !canvasWindow.isDestroyed() && canvasWindow.isVisible()) {
     canvasWindow.hide();
   }
+}
+
+/**
+ * "Bring everything to view." Position all four windows on the active
+ * display in the layout from the v1 spec:
+ *   - Avatar:       top-left
+ *   - Canvas:       top-right
+ *   - Conversations: bottom-center
+ *   - TypingBar:    dead center
+ * Triggered by the `show_all` hotkey or by triple-tapping `typing_bar`
+ * within a 1-second window. Each window is shown if hidden, then nudged
+ * into its slot. The typing bar is the only one that gets focus (since the
+ * user just summoned the constellation to type something).
+ */
+export function showAllWindows(): void {
+  const display = activeDisplay();
+  const { workArea } = display;
+  const margin = 24;
+  const halfW = Math.floor(workArea.width / 2);
+  const halfH = Math.floor(workArea.height / 2);
+
+  // Avatar — keep its current size; just position. Create if needed (the
+  // user may have quit it).
+  const avatar = avatarWindow ?? createAvatarWindow();
+  if (avatar && !avatar.isDestroyed()) {
+    if (!avatar.isVisible()) avatar.show();
+    const ab = avatar.getBounds();
+    avatar.setBounds({
+      x: workArea.x + margin,
+      y: workArea.y + margin,
+      width: ab.width,
+      height: ab.height,
+    });
+  }
+
+  // Canvas — top-right quadrant.
+  if (!canvasWindow || canvasWindow.isDestroyed()) showCanvasWindow();
+  if (canvasWindow && !canvasWindow.isDestroyed()) {
+    if (!canvasWindow.isVisible()) canvasWindow.showInactive();
+    const w = Math.min(CANVAS_W, halfW - margin * 2);
+    const h = Math.min(CANVAS_H, halfH - margin * 2);
+    canvasWindow.setBounds({
+      x: workArea.x + workArea.width - w - margin,
+      y: workArea.y + margin,
+      width: w,
+      height: h,
+    });
+  }
+
+  // Conversations — bottom-center.
+  if (!conversationPanelWindow || conversationPanelWindow.isDestroyed()) {
+    toggleConversationPanelWindow();
+  }
+  if (conversationPanelWindow && !conversationPanelWindow.isDestroyed()) {
+    if (!conversationPanelWindow.isVisible()) conversationPanelWindow.showInactive();
+    const w = Math.min(PANEL_W, workArea.width - margin * 2);
+    const h = Math.min(PANEL_H, halfH - margin * 2);
+    conversationPanelWindow.setBounds({
+      x: workArea.x + Math.floor((workArea.width - w) / 2),
+      y: workArea.y + workArea.height - h - margin,
+      width: w,
+      height: h,
+    });
+  }
+
+  // Typing bar — dead center, focused. The user invoked this to bring
+  // everything to view, presumably to type something next.
+  showTypingBarWindow();
 }
 
 export function getCanvasWindow(): BrowserWindow | null {

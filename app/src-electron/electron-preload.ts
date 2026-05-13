@@ -64,6 +64,8 @@ const win: FaceplatePreload['window'] = {
   quit: () => ipcRenderer.invoke(IPC.window.quit),
   resizeBy: (deltaW: number) => ipcRenderer.invoke(IPC.window.resizeBy, deltaW),
   resetSize: () => ipcRenderer.invoke(IPC.window.resetSize),
+  raiseAvatar: () => ipcRenderer.invoke(IPC.window.raiseAvatar),
+  openTypingBar: () => ipcRenderer.invoke(IPC.window.openTypingBar),
 };
 
 const hotkeys: FaceplatePreload['hotkeys'] = {

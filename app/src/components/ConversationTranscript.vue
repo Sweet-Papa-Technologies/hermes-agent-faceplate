@@ -11,6 +11,15 @@
       />
       <span v-else class="convtrans-title convtrans-title-empty">No conversation selected</span>
       <div v-if="active" class="convtrans-actions">
+        <span
+          v-if="agentBusy"
+          class="convtrans-status"
+          :class="`convtrans-status--${agentState}`"
+          :title="`Agent is ${agentState}`"
+        >
+          <span class="convtrans-status-dot" />
+          {{ statusLabel }}
+        </span>
         <div class="convtrans-tabs">
           <button :class="{ active: tab === 'transcript' }" @click="tab = 'transcript'">Transcript</button>
           <button :class="{ active: tab === 'gallery' }" @click="tab = 'gallery'">Artifacts</button>
@@ -48,12 +57,29 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted } from 'vue';
 
+import { storeToRefs } from 'pinia';
+
 import TurnBubble from './TurnBubble.vue';
 import ArtifactGallery from './ArtifactGallery.vue';
 import { useConversationsStore } from '../stores/conversations';
+import { useAgentStore } from '../stores/agent';
 
 const convs = useConversationsStore();
+const agent = useAgentStore();
+const { state: agentState } = storeToRefs(agent);
 const active = computed(() => convs.active);
+
+// Mirror the avatar's activity surface so a user reading the transcript
+// without the avatar in view still sees what the agent is doing. Only show
+// non-idle states; idle would be visual noise.
+const STATUS_LABELS: Record<string, string> = {
+  listening: 'Listening',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
+  error: 'Error',
+};
+const agentBusy = computed(() => agentState.value !== 'idle');
+const statusLabel = computed(() => STATUS_LABELS[agentState.value] ?? agentState.value);
 const titleEdit = ref<string>('');
 const scrollEl = ref<HTMLDivElement | null>(null);
 const tab = ref<'transcript' | 'gallery'>('transcript');
@@ -163,6 +189,37 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.convtrans-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font: 600 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  background: rgba(127, 220, 255, 0.12);
+  color: #d6f1ff;
+  border: 1px solid rgba(127, 220, 255, 0.3);
+}
+.convtrans-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: convtrans-pulse 1.6s ease-out infinite;
+}
+.convtrans-status--listening { color: #b5f3a8; background: rgba(181, 243, 168, 0.12); border-color: rgba(181, 243, 168, 0.3); }
+.convtrans-status--thinking  { color: #ffe18d; background: rgba(255, 225, 141, 0.12); border-color: rgba(255, 225, 141, 0.3); }
+.convtrans-status--speaking  { color: #d4f1ff; background: rgba(127, 220, 255, 0.14); border-color: rgba(127, 220, 255, 0.32); }
+.convtrans-status--error     { color: #ff9c9c; background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.4); }
+
+@keyframes convtrans-pulse {
+  0%   { box-shadow: 0 0 0 0   currentColor; opacity: 1; }
+  70%  { box-shadow: 0 0 0 6px transparent; opacity: 0.4; }
+  100% { box-shadow: 0 0 0 0   transparent; opacity: 1; }
 }
 
 .convtrans-tabs {

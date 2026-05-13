@@ -65,7 +65,7 @@ export function extractArtifacts(text: string): ExtractResult {
       return _match;
     }
     const kind = kindRaw as ArtifactKind;
-    const body = bodyRaw.trim();
+    const body = stripCdataWrapper(bodyRaw.trim());
     const input = buildInput(kind, body, attrs);
     if (input) artifacts.push({ input });
     // Replace the tag with a brief placeholder rather than emptying it.
@@ -155,6 +155,17 @@ function buildInput(
 
   // text / code / chart / diagram → always inline
   return { ...baseFields, body, body_storage: 'inline' };
+}
+
+// `<![CDATA[ ... ]]>` is an XML escape the model sometimes wraps around
+// artifact bodies because the surrounding `<artifact>` tag looks XML-ish to
+// it. Chart.js / Mermaid / code parsers can't see through the wrapper and
+// fail with cryptic "[CDATA[" errors. Strip it here so the body that hits
+// the renderers is the raw payload the model intended.
+const CDATA_WRAPPER_RE = /^<!\[CDATA\[([\s\S]*?)\]\]>$/;
+function stripCdataWrapper(s: string): string {
+  const m = CDATA_WRAPPER_RE.exec(s);
+  return m && m[1] !== undefined ? m[1].trim() : s;
 }
 
 function tidyWhitespace(s: string): string {

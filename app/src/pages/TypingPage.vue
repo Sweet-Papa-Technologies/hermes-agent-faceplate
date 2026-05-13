@@ -93,11 +93,48 @@ onBeforeUnmount(() => {
   background: rgba(20, 20, 22, 0.92);
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.5),
-    0 2px 0 rgba(255, 255, 255, 0.05) inset,
-    0 0 0 1px rgba(255, 255, 255, 0.08);
+    0 2px 0 rgba(255, 255, 255, 0.05) inset;
   backdrop-filter: blur(18px) saturate(120%);
   -webkit-app-region: drag;
   box-sizing: border-box;
+  /* Cycling rainbow border. The card sits on top of a slightly larger
+   * conic-gradient pseudo-element, masked to a ring shape via padding +
+   * border-radius math. Animation rotates the gradient hue around the
+   * border once every 6 seconds. */
+  position: relative;
+  z-index: 0;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.typing-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--rainbow-angle, 0deg),
+    #ff5e7e, #ff9c4a, #ffe14a, #5ee27a, #5ec8ff, #b078ff, #ff5ec8, #ff5e7e
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  z-index: -1;
+  animation: rainbow-spin 6s linear infinite;
+}
+
+/* Custom property animation needs @property declaration for interpolation
+ * across browsers; without it Chromium still animates the gradient via the
+ * fallback CSS animation defined below. */
+@property --rainbow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes rainbow-spin {
+  to { --rainbow-angle: 360deg; }
 }
 
 .typing-card input {

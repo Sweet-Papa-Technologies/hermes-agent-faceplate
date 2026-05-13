@@ -98,9 +98,13 @@ const sample = ref(
 const result = ref<ParaphraseOutcome | null>(null);
 const loading = ref(false);
 
+// LiteRT option is hidden in v1 — the bundled Gemma sidecar is too small to
+// follow the summarization prompt reliably, and reuse_hermes_llm produces
+// substantially better results for the same latency budget. The schema enum
+// + paraphrase-bridge code paths still support 'local_litert' so a power
+// user can opt in via settings.yaml; we just don't surface it in the UI.
 const modelOptions = [
-  { label: 'Local litert-lm — host-native Google AI Edge LiteRT-LM serve (default)', value: 'local_litert' },
-  { label: 'Reuse hermes-agent\'s configured LLM (requires local ~/.hermes/ access)', value: 'reuse_hermes_llm' },
+  { label: "Reuse hermes-agent's configured LLM (default)", value: 'reuse_hermes_llm' },
   { label: 'Disabled — always speak the full text', value: 'disabled' },
 ];
 

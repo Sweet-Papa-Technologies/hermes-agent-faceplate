@@ -4,6 +4,19 @@
       <header class="convpanel-titlebar">
         <span class="convpanel-titlebar-grip" aria-hidden="true">⋮⋮</span>
         <span class="convpanel-titlebar-text">Conversations</span>
+        <button
+          class="convpanel-titlebar-action"
+          title="Open chat input (Ctrl+Space)"
+          @click="openChatInput"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path
+              d="M2.5 3.5 H13.5 V10.5 H8 L5 13 V10.5 H2.5 Z"
+              fill="none" stroke="currentColor" stroke-width="1.4"
+              stroke-linejoin="round" stroke-linecap="round"
+            />
+          </svg>
+        </button>
         <button class="convpanel-titlebar-close" title="Close (Esc)" @click="closeWindow">×</button>
       </header>
       <div class="convpanel-body">
@@ -25,6 +38,12 @@ const convs = useConversationsStore();
 
 function closeWindow(): void {
   void window.faceplate?.conversations.togglePanel();
+}
+
+function openChatInput(): void {
+  // Brings up the floating typing bar — same window the Ctrl+Space hotkey
+  // opens. Doesn't close the conversations panel; user can fire-and-keep.
+  void window.faceplate?.window.openTypingBar();
 }
 
 function onKey(e: KeyboardEvent): void {
@@ -67,12 +86,45 @@ onBeforeUnmount(() => {
   min-height: 0;
   background: rgba(14, 16, 22, 0.94);
   border-radius: 16px;
+  /* High-shadow + animated rainbow ring (matches canvas window) so the
+   * panel pops against multi-monitor backgrounds. */
   box-shadow:
     0 28px 80px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(127, 220, 255, 0.18),
     0 0 0 1px rgba(255, 255, 255, 0.08) inset;
   backdrop-filter: blur(18px) saturate(125%);
   overflow: hidden;
   color: #f4f5f8;
+  position: relative;
+  z-index: 0;
+}
+.convpanel-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--rainbow-angle, 0deg),
+    #ff5e7e, #ff9c4a, #ffe14a, #5ee27a, #5ec8ff, #b078ff, #ff5ec8, #ff5e7e
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  z-index: -1;
+  animation: rainbow-spin 9s linear infinite;
+  opacity: 0.6;
+  pointer-events: none;
+}
+@property --rainbow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes rainbow-spin {
+  to { --rainbow-angle: 360deg; }
 }
 
 .convpanel-titlebar {
@@ -100,9 +152,30 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 
-.convpanel-titlebar-close {
+.convpanel-titlebar-action {
   -webkit-app-region: no-drag;
   margin-left: auto;
+  background: rgba(127, 220, 255, 0.12);
+  border: 1px solid rgba(127, 220, 255, 0.3);
+  color: rgba(255, 255, 255, 0.9);
+  font: 13px/1 system-ui, sans-serif;
+  width: 28px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.convpanel-titlebar-action:hover {
+  background: rgba(127, 220, 255, 0.24);
+  border-color: rgba(127, 220, 255, 0.5);
+  transform: scale(1.05);
+}
+
+.convpanel-titlebar-close {
+  -webkit-app-region: no-drag;
   background: transparent;
   border: 0;
   color: rgba(255, 255, 255, 0.55);

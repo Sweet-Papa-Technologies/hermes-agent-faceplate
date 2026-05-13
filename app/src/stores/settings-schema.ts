@@ -17,6 +17,7 @@ export const HotkeyNames = [
   'interrupt',
   'conversation_panel',
   'canvas',
+  'show_all',
 ] as const;
 export type HotkeyName = (typeof HotkeyNames)[number];
 
@@ -91,7 +92,7 @@ export const ParaphraseSettings = z.object({
   enabled: z.boolean().default(true),
   trigger_chars: z.number().int().nonnegative().default(140),
   target_words: z.number().int().positive().default(15),
-  model: paraphraseModelInput.default('local_litert'),
+  model: paraphraseModelInput.default('reuse_hermes_llm'),
   /** Endpoint the local_litert mode posts to. Defaults to the litert-lm
    *  serve port set by scripts/start-litert.sh. */
   litert_lm_url: z.string().url().default('http://127.0.0.1:7860/v1'),
@@ -126,10 +127,28 @@ export const WakeSettings = z.object({
   threshold: z.number().min(0).max(1).default(0.5),
 });
 
+/** Sentinel deviceId meaning "follow the OS default device, even if it
+ * changes mid-session." Stored as 'system' so it persists across launches
+ * unaffected by deviceId churn (Chromium re-issues a new opaque id when a
+ * device is unplugged + replugged). The audio pipeline interprets this as
+ * "don't pass deviceId — let the browser pick." */
+export const SYSTEM_DEFAULT_DEVICE = 'system';
+
 export const InputSettings = z.object({
   mode: z.enum(['push_to_talk', 'wake_word', 'off']).default('push_to_talk'),
   ptt_hotkey: HotkeyAccelerator.default('CommandOrControl+Shift+Space'),
   wake: WakeSettings.default({}),
+  /** Microphone deviceId for ASR (push-to-talk + wake-word). 'system' means
+   * "use whatever the OS default is right now." */
+  device_id: z.string().default(SYSTEM_DEFAULT_DEVICE),
+});
+
+export const OutputSettings = z.object({
+  /** Speaker/headphone deviceId for TTS playback. 'system' means follow OS
+   * default. Applied via HTMLMediaElement.setSinkId() on the playback
+   * <audio> element. macOS ignores per-element sink without entitlements;
+   * Linux + Windows honor it. */
+  device_id: z.string().default(SYSTEM_DEFAULT_DEVICE),
 });
 
 export const HotkeysSettings = z.object({
@@ -152,6 +171,11 @@ export const HotkeysSettings = z.object({
   conversation_panel: HotkeyAccelerator.default('CommandOrControl+Shift+J'),
   // Toggles the canvas (artifact viewer) window.
   canvas: HotkeyAccelerator.default('CommandOrControl+Shift+K'),
+  // "Bring everything to view" — arranges all four windows (avatar TL,
+  // canvas TR, conversations BC, typing bar center) on the active display.
+  // Triple-tap of `typing_bar` within 1s ALSO triggers this, so users have
+  // two paths.
+  show_all: HotkeyAccelerator.default('CommandOrControl+Shift+G'),
 });
 
 export const AvatarSettings = z.object({
@@ -165,6 +189,11 @@ export const AvatarSettings = z.object({
   position: z
     .enum(['top_left', 'top_right', 'bottom_left', 'bottom_right', 'last_known'])
     .default('bottom_right'),
+  /** Raise the avatar window to the front when the user submits a question
+   * (typing bar, voice, etc.) so they can see the response without hunting.
+   * Falls back to a gentle no-focus-steal raise if the avatar is overlay
+   * + click-through. */
+  raise_on_submit: z.boolean().default(true),
 });
 
 export const PrivacySettings = z.object({
@@ -208,6 +237,7 @@ export const FaceplateSettings = z.object({
   paraphrase: ParaphraseSettings.default({}),
   speech: SpeechSettings.default({}),
   input: InputSettings.default({}),
+  output: OutputSettings.default({}),
   hotkeys: HotkeysSettings.default({}),
   avatar: AvatarSettings.default({}),
   privacy: PrivacySettings.default({}),
@@ -222,6 +252,7 @@ export type ParaphraseSettings = z.infer<typeof ParaphraseSettings>;
 export type SpeechSettings = z.infer<typeof SpeechSettings>;
 export type AvatarSettings = z.infer<typeof AvatarSettings>;
 export type InputSettings = z.infer<typeof InputSettings>;
+export type OutputSettings = z.infer<typeof OutputSettings>;
 export type HotkeysSettings = z.infer<typeof HotkeysSettings>;
 export type PrivacySettings = z.infer<typeof PrivacySettings>;
 export type ArtifactsSettings = z.infer<typeof ArtifactsSettings>;

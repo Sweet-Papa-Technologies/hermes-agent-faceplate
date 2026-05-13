@@ -42,7 +42,14 @@ INSTEAD, emit the spec directly. Tag bodies are stripped from TTS so narration g
 Tag format:
 <artifact type="..." title="..." [lang="..."]>BODY</artifact>
 
-Types: chart (Chart.js JSON), diagram (Mermaid), code (any lang), text (markdown), image (URL), video (URL — YouTube/Vimeo/Twitch/Dailymotion auto-embed), audio (URL — Spotify/SoundCloud/Apple Music auto-embed), visual.
+NEVER wrap BODY in \`<![CDATA[...]]>\`. Emit the raw body directly between the tags. CDATA wrappers break Chart.js / Mermaid / code parsers.
+
+Types: chart (Chart.js JSON ONLY — never CSV / TSV / table data), diagram (Mermaid), code (any lang — INCLUDING csv/tsv/json/yaml/markdown for tabular or structured data), text (markdown prose), image (URL), video (URL — YouTube/Vimeo/Twitch/Dailymotion auto-embed), audio (URL — Spotify/SoundCloud/Apple Music auto-embed), visual.
+
+PICK THE RIGHT TYPE:
+- Tabular data the user wants to see/sort/download → \`<artifact type="code" lang="csv">\` (renders as a sortable table; downloads as .csv)
+- Bar / line / pie / scatter visualization of numeric data → \`<artifact type="chart">\` with Chart.js JSON
+- DO NOT put CSV inside a chart artifact — chart bodies must be valid Chart.js JSON only.
 
 Examples:
 <artifact type="chart" title="Sales">{"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"$","data":[12,19]}]},"options":{"scales":{"y":{"beginAtZero":true}}}}</artifact>

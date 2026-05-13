@@ -21,6 +21,7 @@ import {
   showTypingBarWindow,
   toggleConversationPanelWindow,
   toggleCanvasWindow,
+  showAllWindows,
 } from './window';
 
 interface FallbackPlan {
@@ -34,6 +35,26 @@ const FALLBACKS: Partial<Record<HotkeyName, string[]>> = {
 
 const registered = new Map<HotkeyName, string>();
 
+// Triple-tap detector for the `typing_bar` hotkey: 3 fires within 1 second
+// trigger the "show everything" layout. Each fire still also opens the
+// typing bar (non-destructive — the bar gets repositioned by showAllWindows
+// on the third fire). Resets when the gap exceeds the window.
+const TRIPLE_TAP_WINDOW_MS = 1_000;
+const TRIPLE_TAP_COUNT = 3;
+let typingBarPressTimes: number[] = [];
+
+function maybeFireTripleTap(): boolean {
+  const now = Date.now();
+  typingBarPressTimes = typingBarPressTimes.filter((t) => now - t <= TRIPLE_TAP_WINDOW_MS);
+  typingBarPressTimes.push(now);
+  if (typingBarPressTimes.length >= TRIPLE_TAP_COUNT) {
+    typingBarPressTimes = [];
+    showAllWindows();
+    return true;
+  }
+  return false;
+}
+
 function defaultHandler(name: HotkeyName): () => void {
   return () => {
     switch (name) {
@@ -44,8 +65,11 @@ function defaultHandler(name: HotkeyName): () => void {
         cycleMonitor();
         return;
       case 'typing_bar':
-        // Owned by main: open the standalone centered typing window on the
-        // active display. Toggle if already visible (show again-> hide).
+        // Triple-tap → show all windows. Single/double tap → just open the
+        // typing bar as usual. The triple-tap path also calls
+        // showAllWindows which re-shows + repositions the typing bar in
+        // the center, so the user gets visual continuity.
+        if (maybeFireTripleTap()) return;
         showTypingBarWindow();
         return;
       case 'conversation_panel':
@@ -53,6 +77,9 @@ function defaultHandler(name: HotkeyName): () => void {
         return;
       case 'canvas':
         toggleCanvasWindow();
+        return;
+      case 'show_all':
+        showAllWindows();
         return;
       default:
         broadcastPress(name);

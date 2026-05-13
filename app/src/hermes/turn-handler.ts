@@ -185,6 +185,13 @@ async function runTurn(userText: string): Promise<void> {
   agent.setActivity({ label: 'Thinking', icon: 'auto_awesome', ts: Date.now() });
   convo.startTurn('assistant');
 
+  // Bring the avatar to the front so the user sees the response without
+  // hunting for the window. Doesn't steal text focus (main uses moveTop /
+  // showInactive). Disabled via settings.avatar.raise_on_submit.
+  if (settings.settings.avatar.raise_on_submit) {
+    void window.faceplate?.window.raiseAvatar();
+  }
+
   const abort = new AbortController();
   const handle: ActiveTurn = { abort, tts: null, driver: null, run: null, response: null };
   active = handle;
@@ -598,6 +605,7 @@ async function speakAndAnimate(
   console.log(`[turn] speakStream #${sid} START voice="${speech.tts.voice}" model="${speech.tts.model}" len=${text.length} active===handle? ${active === handle}`);
   let speak: SpeakHandle;
   try {
+    const outputDeviceId = settings.settings.output.device_id;
     speak = speakStream({
       baseUrl: ttsBaseUrl,
       ...(speech.sidecar_token ? { apiKey: speech.sidecar_token } : {}),
@@ -609,6 +617,7 @@ async function speakAndAnimate(
       },
       format: speech.tts.format,
       signal: handle.abort.signal,
+      ...(outputDeviceId ? { outputDeviceId } : {}),
       onAnalyser: (analyser) => {
         handle.driver?.stop();
         handle.driver = startVisemeDriver(analyser);

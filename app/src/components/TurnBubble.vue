@@ -20,14 +20,26 @@
       />
     </div>
     <div v-if="turn.tool_calls?.length" class="turn-tools">
-      <ToolCallCard v-for="(tc, i) in turn.tool_calls" :key="i" :call="tc" />
+      <button
+        class="turn-tools-toggle"
+        :aria-expanded="toolsExpanded"
+        @click="toolsExpanded = !toolsExpanded"
+      >
+        <span class="turn-tools-chevron" :class="{ open: toolsExpanded }">▸</span>
+        {{ toolsExpanded ? 'Hide' : 'Show' }}
+        {{ turn.tool_calls.length }} tool {{ turn.tool_calls.length === 1 ? 'call' : 'calls' }}
+        <span class="turn-tools-summary">— {{ toolSummary }}</span>
+      </button>
+      <div v-if="toolsExpanded" class="turn-tools-list">
+        <ToolCallCard v-for="(tc, i) in turn.tool_calls" :key="i" :call="tc" />
+      </div>
     </div>
     <div v-if="turn.error" class="turn-error">{{ turn.error }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -37,6 +49,19 @@ import type { PersistedTurn } from '../stores/conversation-types';
 import { useArtifactsStore } from '../stores/artifacts';
 
 const props = defineProps<{ turn: PersistedTurn }>();
+
+// Tool calls are collapsed by default — they're useful for debugging but
+// noisy in normal reading. The button shows a one-line summary so the user
+// knows what the agent did without expanding.
+const toolsExpanded = ref(false);
+const toolSummary = computed(() => {
+  const calls = props.turn.tool_calls ?? [];
+  const names = [...new Set(calls.map((c) => c.tool))];
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return names.join(', ');
+  return `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+});
 const artifacts = useArtifactsStore();
 
 // Index entries are kept in-store and broadcast across windows; we lookup
@@ -132,6 +157,45 @@ function formatTime(ts: number): string {
   flex-direction: column;
   gap: 4px;
   width: 100%;
+}
+.turn-tools-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(127, 220, 255, 0.06);
+  border: 1px solid rgba(127, 220, 255, 0.18);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  font: 11px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+}
+.turn-tools-toggle:hover {
+  background: rgba(127, 220, 255, 0.14);
+  color: #fff;
+  border-color: rgba(127, 220, 255, 0.35);
+}
+.turn-tools-chevron {
+  display: inline-block;
+  transition: transform 120ms ease;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.turn-tools-chevron.open {
+  transform: rotate(90deg);
+}
+.turn-tools-summary {
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+.turn-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .turn-artifacts {

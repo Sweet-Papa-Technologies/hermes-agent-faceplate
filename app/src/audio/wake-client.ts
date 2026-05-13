@@ -37,17 +37,41 @@ export async function startWakeClient(): Promise<void> {
   const url = wakeWsUrl(settings);
   if (!url) return;
 
+  // Honour the user's persisted mic choice for wake-word too. 'system' (or
+  // empty) → omit deviceId so the OS default flows through. If the saved
+  // device isn't currently present we retry without it; the saved value
+  // stays put so re-plugging restores the choice.
+  const savedId = settings.settings.input.device_id;
+  const deviceId = savedId && savedId !== 'system' ? savedId : undefined;
+  const baseConstraints: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    channelCount: 1,
+  };
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       // AEC + NS on so the wake model doesn't self-trigger on its own TTS
       // playback. The detector still gets clean speech because Chromium's
       // AEC is downstream-aware.
-      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+      audio: deviceId
+        ? { ...baseConstraints, deviceId: { exact: deviceId } }
+        : baseConstraints,
     });
     useAgentStore().setMicActive(true);
   } catch (err) {
-    console.error('[wake] mic open failed:', err);
-    return;
+    if (deviceId && err instanceof Error && /NotFoundError|OverconstrainedError/.test(err.name)) {
+      console.warn(`[wake] saved deviceId unavailable, retrying with system default:`, err.message);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: baseConstraints });
+        useAgentStore().setMicActive(true);
+      } catch (err2) {
+        console.error('[wake] mic open failed (system default):', err2);
+        return;
+      }
+    } else {
+      console.error('[wake] mic open failed:', err);
+      return;
+    }
   }
 
   context = new AudioContext({ sampleRate: TARGET_SR });
@@ -142,8 +166,24 @@ async function openCaptureWindow(): Promise<void> {
   if (agent.state === 'thinking' || agent.state === 'speaking') {
     interruptTurn('user.wake');
   }
+  // Same device-resolution dance as ptt-controller — use the persisted
+  // mic if set, fall back to OS default if it's missing this session.
+  const savedId = settings.settings.input.device_id;
+  const deviceId = savedId && savedId !== 'system' ? savedId : undefined;
   try {
-    asrSession = await startAsrSession({ endpoint, maxDurationMs: 8_000 });
+    try {
+      asrSession = await startAsrSession(
+        deviceId
+          ? { endpoint, deviceId, maxDurationMs: 8_000 }
+          : { endpoint, maxDurationMs: 8_000 },
+      );
+    } catch (err) {
+      if (deviceId && err instanceof Error && /NotFoundError|OverconstrainedError/.test(err.name)) {
+        asrSession = await startAsrSession({ endpoint, maxDurationMs: 8_000 });
+      } else {
+        throw err;
+      }
+    }
     agent.transition('listening', 'wake');
     const result = await asrSession.stop();
     asrSession = null;

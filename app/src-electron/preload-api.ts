@@ -177,6 +177,13 @@ export interface FaceplatePreload {
     resizeBy(deltaW: number): Promise<void>;
     /** Reset the avatar window to its default size. */
     resetSize(): Promise<void>;
+    /** Bring the avatar window to the front. Doesn't steal text focus by
+     * default — use this when the user submits a turn so they can see the
+     * response without losing typing focus elsewhere. */
+    raiseAvatar(): Promise<void>;
+    /** Open the floating typing bar (same window the Ctrl+Space hotkey
+     * opens). Used by the Conversations panel's chat-input button. */
+    openTypingBar(): Promise<void>;
   };
   hotkeys: {
     register(name: HotkeyName, accelerator: string): Promise<RegisterResult>;
@@ -311,6 +318,8 @@ export const IPC = {
     quit: 'faceplate:window:quit',
     resizeBy: 'faceplate:window:resize-by',
     resetSize: 'faceplate:window:reset-size',
+    raiseAvatar: 'faceplate:window:raise-avatar',
+    openTypingBar: 'faceplate:window:open-typing-bar',
   },
   hotkeys: {
     register: 'faceplate:hotkeys:register',

@@ -68,6 +68,19 @@ function migrateParaphrasePrompt(): void {
   );
 }
 
+// One-shot migration: bump existing users off `local_litert` → `reuse_hermes_llm`
+// since the LiteRT option is hidden in v1 (the bundled Gemma-4-E2B is too
+// small to follow the summarize prompt reliably). The schema enum still
+// accepts 'local_litert' so power users can opt in by editing settings.yaml,
+// but the default + UI option is gone. Leave 'disabled' alone — that's an
+// explicit user choice.
+function migrateParaphraseModelAwayFromLitert(): void {
+  const current = getSettings().paraphrase.model;
+  if (current !== 'local_litert') return;
+  applyPatch({ paraphrase: { model: 'reuse_hermes_llm' } });
+  console.log("[main] migrated paraphrase.model: local_litert → reuse_hermes_llm");
+}
+
 // One-shot: seed `hermes.api_key` from ~/.hermes/.env when empty. The wizard
 // asks the user to paste the key by hand; if they skipped that field but
 // the local hermes config is readable, we already have it. Without this,
@@ -260,6 +273,7 @@ void app.whenReady().then(() => {
   ensureCanvasSkillInstalled();
 
   migrateParaphrasePrompt();
+  migrateParaphraseModelAwayFromLitert();
   seedHermesApiKeyFromLocalEnv();
   seedSidecarTokenFromMakefileCache();
   installCorsHeaderInjection();
