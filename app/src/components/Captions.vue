@@ -9,10 +9,11 @@
     @wheel="onInteract"
     @click="onInteract"
   >
-    <!-- Auto-close countdown bar. Renders only while we're showing the
-         residual transcript (post-speech grace period). Fills as time
-         REMAINS, draining left-to-right. -->
-    <div v-if="isResidual" class="captions-progress">
+    <!-- Auto-close countdown bar. Renders only while a timer is actually
+         draining — once the user interacts, the timer is cleared and the
+         popup stays open silently (no bar). Fills as time REMAINS,
+         draining left-to-right. -->
+    <div v-if="showProgress" class="captions-progress">
       <div class="captions-progress-bar" :style="{ transform: `scaleX(${progress})` }" />
     </div>
 
@@ -76,17 +77,28 @@ marked.setOptions({ gfm: true, breaks: true, async: false });
 // After the agent finishes speaking, the response box stays open for a
 // grace window so the user can read it. The countdown:
 //   - starts when we transition from speaking/thinking → idle
-//   - cancels + restarts whenever the user interacts (hover, scroll, click)
-//   - hides on expiry OR if the user hits the close button
-// During the grace window we show the last assistant turn from history,
-// since currentTurn is null after finalize.
+//   - on user interaction (hover, scroll, click), the timer is *cleared*
+//     and the box is "pinned" open — no bar, no auto-close, until the
+//     user explicitly hits ✕ (or a new turn replaces it)
+//   - hides on expiry OR on close button
+//
+// Two visibility states besides "live streaming":
+//   - residualExpiresAt !== null  → countdown running (progress bar visible)
+//   - pinned === true             → user engaged; stay open silently
+//
+// During both, we show `lastAssistant.text` since currentTurn is null
+// after finalize.
 const RESIDUAL_MS = 20_000;
 const TICK_MS = 100;
 
 const residualExpiresAt = ref<number | null>(null);
+const pinned = ref<boolean>(false);
 const now = ref<number>(Date.now());
 let tick: ReturnType<typeof setInterval> | null = null;
-let manuallyClosedTurnId: string | null = null;
+// Tracks the *id* of the response the user explicitly closed. Used to
+// suppress re-display of the same response if a downstream watcher would
+// otherwise pop it back open. Cleared when a brand-new assistant turn lands.
+const dismissedTurnId = ref<string | null>(null);
 
 function startTick(): void {
   if (tick) return;
@@ -106,22 +118,33 @@ function stopTick(): void {
 }
 
 function armResidualTimer(): void {
+  // Don't auto-pop a response the user just dismissed — wait for the next turn.
+  if (dismissedTurnId.value && dismissedTurnId.value === lastAssistant.value?.id) return;
+  pinned.value = false;
   residualExpiresAt.value = Date.now() + RESIDUAL_MS;
   now.value = Date.now();
   startTick();
 }
 
 function onInteract(): void {
-  // User is actively reading; keep the box open by resetting the timer.
-  if (residualExpiresAt.value !== null) armResidualTimer();
+  // User engaged — kill the countdown and pin the box open. No more bar,
+  // no auto-close. Mid-stream interactions are a no-op (timer's not running
+  // yet); the `pinned` state only takes effect once liveText is gone.
+  if (residualExpiresAt.value === null) return;
+  residualExpiresAt.value = null;
+  stopTick();
+  pinned.value = true;
 }
 
 function closeNow(): void {
-  // Remember which turn the user dismissed so a re-emit of the same lastAssistant
-  // (no new turn yet) doesn't pop the box back up. Cleared when a new
-  // assistant turn finishes.
-  manuallyClosedTurnId = lastAssistant.value?.id ?? null;
+  // Hard-close: hide regardless of whether TTS is mid-stream. We also
+  // memo the turn id so that any subsequent state-transition watcher
+  // doesn't re-pop the same response. Both the in-flight currentTurn id
+  // and the post-finalize lastAssistant id are valid targets — they're the
+  // same response, just at different phases. Memo whichever we have.
+  dismissedTurnId.value = convo.currentTurn?.id ?? lastAssistant.value?.id ?? null;
   residualExpiresAt.value = null;
+  pinned.value = false;
   stopTick();
 }
 
@@ -130,35 +153,42 @@ async function openConversations(): Promise<void> {
 }
 
 // When the agent's active state transitions away from speaking/thinking and
-// we have an assistant reply to show, arm the timer. captionText (live
-// currentTurn) takes precedence while it exists; we only show the residual
-// once currentTurn has been finalized.
+// we have an assistant reply to show, arm the timer.
 watch(
   () => agentState.value,
   (state, prev) => {
     const wasActive = prev === 'speaking' || prev === 'thinking' || prev === 'listening';
     const isActive = state === 'speaking' || state === 'thinking' || state === 'listening';
     if (wasActive && !isActive && lastAssistant.value) {
-      // New assistant turn = clear the manual-close memo so it can show again.
-      if (manuallyClosedTurnId !== lastAssistant.value.id) {
-        armResidualTimer();
-      }
+      armResidualTimer();
     }
     if (isActive) {
-      // Activity resumed — drop residual and let live captions take over.
+      // Activity resumed — drop residual + pin and let live captions take over.
       residualExpiresAt.value = null;
+      pinned.value = false;
       stopTick();
     }
   },
 );
 
-// Clear the manual-close memo whenever a brand-new assistant turn lands, so
-// the close button only suppresses the current message, not all future ones.
+// Defensive arm: when a brand-new assistant turn lands while the agent is
+// already idle (e.g. the canvas window opening races with the speaking→idle
+// transition and the watcher above misses it), arm the timer so the response
+// pop still appears + counts down. Also clears the dismissed memo so the
+// new response isn't suppressed by a stale close.
 watch(
   () => lastAssistant.value?.id,
   (id, prevId) => {
-    if (id && id !== prevId && id !== manuallyClosedTurnId) {
-      manuallyClosedTurnId = null;
+    if (!id || id === prevId) return;
+    if (dismissedTurnId.value && dismissedTurnId.value !== id) {
+      dismissedTurnId.value = null;
+    }
+    const isActive =
+      agentState.value === 'speaking' ||
+      agentState.value === 'thinking' ||
+      agentState.value === 'listening';
+    if (!isActive && residualExpiresAt.value === null && !pinned.value) {
+      armResidualTimer();
     }
   },
 );
@@ -169,19 +199,28 @@ onBeforeUnmount(stopTick);
 // ─── content selection ───────────────────────────────────────────────────
 //
 // While there's an in-flight currentTurn, show that. Otherwise, if the
-// residual timer is running, show the last assistant turn. Otherwise hide.
+// residual timer is running OR the user pinned the popup open, show the
+// last assistant turn. Otherwise hide.
 const liveText = computed(() => captionText.value);
+const isDismissed = computed(() => {
+  const id = dismissedTurnId.value;
+  if (!id) return false;
+  return id === convo.currentTurn?.id || id === lastAssistant.value?.id;
+});
 const isResidual = computed(() =>
-  !liveText.value && residualExpiresAt.value !== null,
+  !liveText.value && (residualExpiresAt.value !== null || pinned.value),
 );
 const shownText = computed(() => {
+  if (isDismissed.value) return '';
   if (liveText.value) return liveText.value;
-  if (residualExpiresAt.value === null) return '';
-  if (manuallyClosedTurnId && manuallyClosedTurnId === lastAssistant.value?.id) return '';
+  if (residualExpiresAt.value === null && !pinned.value) return '';
   return lastAssistant.value?.text ?? '';
 });
 const visible = computed(() => captionsVisible.value);
 
+const showProgress = computed(
+  () => !liveText.value && residualExpiresAt.value !== null,
+);
 const progress = computed(() => {
   if (residualExpiresAt.value === null) return 0;
   const remaining = residualExpiresAt.value - now.value;

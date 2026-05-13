@@ -119,7 +119,7 @@
           </li>
           <li>
             Add a shared secret to <code>~/.hermes/.env</code>:
-            <pre class="snippet">FACEPLATE_API_KEY=<replace-with-random>
+            <pre class="snippet">FACEPLATE_API_KEY=&lt;replace-with-random&gt;
 FACEPLATE_HOME_CHANNEL=default
 FACEPLATE_PORT=8643</pre>
             Paste the same <code>FACEPLATE_API_KEY</code> value into the field above.
