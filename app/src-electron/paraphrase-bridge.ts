@@ -63,6 +63,32 @@ interface ChatBody {
   max_tokens?: number;
   temperature?: number;
   stream?: false;
+  /** Qwen3 / DeepSeek-style "skip the chain-of-thought" hints. Non-reasoning
+   * servers ignore unknown fields. With reasoning models (e.g. Qwen3.6) the
+   * default behaviour is to spend the entire token budget on
+   * `reasoning_content` and emit an empty `content` — useless for TTS. */
+  enable_thinking?: false;
+  reasoning_effort?: 'minimal' | 'low';
+  chat_template_kwargs?: { enable_thinking: false };
+}
+
+/** Rewrite Docker-only hostnames to their host-side equivalents.
+ * `host.docker.internal` is a magic name Docker Desktop injects into
+ * containers so they can reach the host. From the host itself (where
+ * Electron runs), the same name is rarely resolvable — but the same
+ * service is reachable on `localhost`. Same for the Linux convention
+ * `gateway.docker.internal`. Leaves all other URLs untouched. */
+function rewriteDockerHostUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'host.docker.internal' || u.hostname === 'gateway.docker.internal') {
+      u.hostname = '127.0.0.1';
+      return u.toString();
+    }
+  } catch {
+    /* malformed — leave it */
+  }
+  return url;
 }
 
 function isLocalNetwork(url: string): boolean {
@@ -117,9 +143,26 @@ async function postChat(
   body: ChatBody,
 ): Promise<string> {
   const json = (await postJson(url, apiKey, body)) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{
+      message?: { content?: string; reasoning_content?: string };
+      finish_reason?: string;
+    }>;
   };
-  return json.choices?.[0]?.message?.content?.trim() ?? '';
+  const choice = json.choices?.[0];
+  const content = choice?.message?.content?.trim() ?? '';
+  if (content) return content;
+  // Reasoning models can produce empty content if the entire token budget
+  // was consumed by chain-of-thought. Log enough to diagnose without
+  // spamming the full thought trace.
+  const reasoning = choice?.message?.reasoning_content ?? '';
+  if (reasoning) {
+    console.warn(
+      `[paraphrase] empty content but reasoning_content=${reasoning.length} chars present, ` +
+      `finish_reason=${choice?.finish_reason}. Reasoning model spent the budget thinking — ` +
+      `bump max_tokens or set enable_thinking:false on the request.`,
+    );
+  }
+  return '';
 }
 
 // litert-lm 0.11 `serve --api openai` exposes the Responses API only.
@@ -198,13 +241,27 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
     if (!llm.model) {
       throw new Error('Hermes config has no model.default set.');
     }
-    const url = `${llm.base_url.replace(/\/+$/, '')}/chat/completions`;
+    const baseUrl = rewriteDockerHostUrl(llm.base_url);
+    const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    // Token budget: enough headroom for ~target_words plus a small fudge,
+    // OR a generous floor for reasoning models that ignore the no-think
+    // hints below and still burn budget on chain-of-thought. Without the
+    // floor, Qwen3.6/DeepSeek-style models return empty content
+    // (finish_reason=length) because they spent the whole allowance
+    // thinking and never wrote the answer.
+    const maxTokens = Math.max(512, cfg.target_words * 8);
     const result = await postChat(url, llm.api_key, {
       model: llm.model,
       messages,
-      max_tokens: Math.max(48, cfg.target_words * 4),
+      max_tokens: maxTokens,
       temperature: 0.4,
       stream: false,
+      // Three different "don't think" conventions across server stacks
+      // (vLLM, llama.cpp+Qwen template, OpenAI Responses-style). Servers
+      // that don't recognize these silently ignore them.
+      enable_thinking: false,
+      reasoning_effort: 'minimal',
+      chat_template_kwargs: { enable_thinking: false },
     });
     return {
       text: sanitizeParaphrase(result, text),
@@ -268,24 +325,62 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
 }
 
 /**
- * Validate the LLM's paraphrase output. Tiny models (Gemma-4-E2B in
- * particular) periodically misfire — they ignore the system prompt and
- * answer the user message as if it were a chat turn ("Please tell me what
- * you'd like me to summarize, smiley face"). When that happens we'd rather
- * speak the original text than the canned reply. Returns the original on
- * any failure signal.
+ * Clean + validate the LLM's paraphrase output. Two things happen here:
+ *
+ * 1. Strip meta-prefixes the model adds despite being told not to
+ *    ("Sure, here's a summary:", "Summary:", "Here you go:", etc.) plus
+ *    leading/trailing quote marks. These would otherwise be read out loud.
+ * 2. Reject canned refusals from tiny models that ignored the prompt
+ *    entirely ("Please tell me what you'd like me to summarize"). We'd
+ *    rather speak the original than the refusal.
+ *
+ * The cleaned candidate is also logged so it's visible WHY a paraphrase
+ * passed or fell back to the original.
  */
 function sanitizeParaphrase(candidate: string, original: string): string {
-  const c = candidate.trim();
+  const raw = candidate.trim();
+  console.log(`[paraphrase] raw model output (${raw.length} chars): ${JSON.stringify(raw.slice(0, 240))}${raw.length > 240 ? '…' : ''}`);
+  if (!raw) {
+    console.warn('[paraphrase] empty output, using original');
+    return original;
+  }
+  // Strip common prefixes the model emits despite the prompt asking it
+  // not to. Case-insensitive, only at the very start.
+  let c = raw;
+  const PREFIXES = [
+    /^(?:sure[,!.\s]+)?(?:here(?:'s|\sis)\s+(?:a\s+|the\s+|your\s+)?(?:short\s+)?(?:spoken\s+)?summary[:.\-\s]+)/i,
+    /^(?:summary|spoken\s+summary|tts\s+summary|paraphrase|tl;dr)[:.\-\s]+/i,
+    /^(?:okay|ok|alright|certainly|absolutely)[,.\s]+/i,
+    /^(?:here\s+(?:you\s+go|it\s+is)|got\s+it)[:.\-\s]+/i,
+  ];
+  for (const re of PREFIXES) {
+    const m = c.match(re);
+    if (m) {
+      c = c.slice(m[0].length).trim();
+    }
+  }
+  // Strip wrapping quotes.
+  c = c.replace(/^["'`]+|["'`]+$/g, '').trim();
   if (!c) return original;
   // Way shorter than expected for a real summary AND looks like a refusal.
   if (c.length < 12 && CANNED_FAILURE_RE.test(c)) return original;
-  // Anywhere in the output, common refusal patterns. We're stricter on
-  // these than on length because they're high-signal.
+  // Anywhere in the output, common refusal patterns.
   if (CANNED_FAILURE_RE.test(c)) {
     console.warn(`[paraphrase] suspicious output (${c.length} chars), using original`);
     return original;
   }
+  // Defence against the model echoing the input back verbatim — a
+  // common failure mode where the model treats the input as something to
+  // repeat, not summarize. If the cleaned candidate is >= 95% of the
+  // original length, it's almost certainly an echo.
+  if (c.length >= Math.floor(original.length * 0.95) && c.length > 80) {
+    console.warn(
+      `[paraphrase] candidate (${c.length} chars) ≈ original (${original.length}); ` +
+      `model echoed instead of summarizing — using original for TTS skip`,
+    );
+    return original;
+  }
+  if (c !== raw) console.log(`[paraphrase] cleaned: ${JSON.stringify(c.slice(0, 160))}${c.length > 160 ? '…' : ''}`);
   return c;
 }
 

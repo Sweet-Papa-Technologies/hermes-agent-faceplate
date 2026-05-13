@@ -45,10 +45,16 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     return d.local_config?.api_key_present_in_env ?? false;
   });
 
-  /** Local file-based bypass for paraphrase is available iff local config is readable. */
+  /** Local file-based bypass for paraphrase is available iff local config is
+   * readable AND we know where to send the request. The api_key is OPTIONAL —
+   * `provider: custom` setups (local llama.cpp / Ollama / vLLM, the user's
+   * INFINITY backend) commonly serve unauthenticated, and requiring a key
+   * here was making `reuse_hermes_llm` mode unreachable for them.
+   * paraphrase-bridge already omits the Authorization header when the key
+   * is missing, so the request goes through fine. */
   const canBypassParaphrase = computed<boolean>(() => {
     const d = discovery.value;
-    return Boolean(d?.local_config_readable && d.local_config?.llm.api_key_present);
+    return Boolean(d?.local_config_readable && d.local_config?.llm.base_url);
   });
 
   return { discovery, loading, error, refresh, useRuns, canBypassParaphrase };
