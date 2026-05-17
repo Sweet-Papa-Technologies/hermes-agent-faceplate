@@ -88,6 +88,58 @@ export interface AgentPushStatus {
   last_frame_at: number | null;
 }
 
+/** Preview of what an Install Plugin click will change on disk. UI shows
+ * this in a confirm dialog so the user knows exactly what's being touched. */
+export interface AgentPushInstallPreview {
+  /** Absolute path of the bundled plugin source (read-only). */
+  plugin_src: string;
+  /** Absolute path the plugin will be copied to (`~/.hermes/plugins/faceplate`). */
+  plugin_dst: string;
+  /** True if `plugin_dst/plugin.yaml` already exists — install will overwrite. */
+  plugin_already_present: boolean;
+  /** Absolute path to `~/.hermes/.env` (may not exist yet). */
+  env_path: string;
+  /** Vars we'll APPEND if missing. We never overwrite existing values
+   *  (in case the user has a custom port / shared secret already). */
+  env_additions: Array<{ key: string; value: string; already_set: boolean }>;
+  /** Hermes Docker container we'd offer to restart after the copy, if we
+   *  can find a likely match. Null = ask the user to restart manually. */
+  hermes_container: HermesContainerCandidate | null;
+}
+
+export interface HermesContainerCandidate {
+  /** Container name (what you pass to `docker restart`). */
+  name: string;
+  /** Image tag we matched against (for the UI to show in the confirm
+   *  dialog so the user can sanity-check we picked the right one). */
+  image: string;
+  /** 'running' | 'exited' | other docker states. We only ever restart
+   *  containers in the 'running' state — exited ones get a `docker start`. */
+  state: string;
+  /** True if more than one container matched our heuristic. The UI should
+   *  show a "this might not be the right one — verify name" caveat. */
+  ambiguous: boolean;
+}
+
+export interface AgentPushInstallResult {
+  ok: boolean;
+  /** Same key the renderer should now show in the FACEPLATE_API_KEY field.
+   *  Either freshly generated or read back from a pre-existing .env entry. */
+  api_key: string;
+  /** Container suggestion (post-install — same shape as preview). */
+  hermes_container: HermesContainerCandidate | null;
+  /** Human-readable summary lines for a "what happened" banner. */
+  steps: string[];
+  error?: string;
+}
+
+export interface RestartHermesResult {
+  ok: boolean;
+  /** Name of the container we restarted (echo-back for the UI toast). */
+  container: string;
+  error?: string;
+}
+
 /** Payload for `faceplate:notify:show`. Kept tight on purpose — the main
  * process owns formatting, sound choice, click routing, and dedup. */
 export interface NotifyOptions {
@@ -290,6 +342,17 @@ export interface FaceplatePreload {
     onFrame(cb: (frame: AgentPushFrame) => void): () => void;
     /** Current connection state. Polled by the Settings UI for a status chip. */
     status(): Promise<AgentPushStatus>;
+    /** Dry-run inspector: report exactly which files would be written and
+     *  which env vars would be added. Renderer shows this in a confirm
+     *  dialog before any disk write. */
+    installPreview(): Promise<AgentPushInstallPreview>;
+    /** Perform the install: copy the plugin, append missing env vars,
+     *  generate FACEPLATE_API_KEY if needed, write it into settings. Does
+     *  NOT restart the Hermes container — that's a separate explicit step. */
+    install(): Promise<AgentPushInstallResult>;
+    /** Restart a specific Hermes Docker container. Caller passes the
+     *  container name verified by the user in a confirm dialog. */
+    restartHermes(containerName: string): Promise<RestartHermesResult>;
   };
   kokoro: {
     /** Lightweight status snapshot. Used by the Kokoro engine card to
@@ -452,6 +515,12 @@ export const IPC = {
     received: 'faceplate:agent-push:received',
     /** renderer → main: lifecycle status query. */
     status: 'faceplate:agent-push:status',
+    /** renderer → main: dry-run preview of an install. */
+    installPreview: 'faceplate:agent-push:install-preview',
+    /** renderer → main: copy plugin + append env vars + generate key. */
+    install: 'faceplate:agent-push:install',
+    /** renderer → main: docker restart <name>. */
+    restartHermes: 'faceplate:agent-push:restart-hermes',
   },
   kokoro: {
     /** Status of the bundled Kokoro Docker container + reachability. */

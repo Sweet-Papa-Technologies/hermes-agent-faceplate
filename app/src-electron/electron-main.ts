@@ -36,6 +36,7 @@ import { registerPlatformIpc } from './platform-bridge';
 import { registerNotificationsIpc } from './notifications-bridge';
 import { registerArtifactFixIpc } from './artifact-fix-bridge';
 import { startAgentPushBridge, stopAgentPushBridge } from './agent-push-bridge';
+import { registerAgentPushInstallerIpc } from './agent-push-installer';
 import { registerKokoroIpc } from './kokoro-lifecycle';
 import {
   ensureBootstrapConversation,
@@ -261,6 +262,7 @@ void app.whenReady().then(() => {
   registerArtifactsIpc();
   registerArtifactFixIpc();
   startAgentPushBridge();
+  registerAgentPushInstallerIpc();
   registerKokoroIpc();
 
   // Catch every webContents (avatar, canvas, settings, …) and route any

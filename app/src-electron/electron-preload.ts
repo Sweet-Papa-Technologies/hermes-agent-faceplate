@@ -136,6 +136,10 @@ const agentPush: FaceplatePreload['agentPush'] = {
     return () => ipcRenderer.removeListener(IPC.agentPush.received, listener);
   },
   status: () => ipcRenderer.invoke(IPC.agentPush.status),
+  installPreview: () => ipcRenderer.invoke(IPC.agentPush.installPreview),
+  install: () => ipcRenderer.invoke(IPC.agentPush.install),
+  restartHermes: (name: string) =>
+    ipcRenderer.invoke(IPC.agentPush.restartHermes, name),
 };
 
 const notify: FaceplatePreload['notify'] = {

@@ -209,6 +209,13 @@ export default defineConfig((ctx) => {
             from: '../sidecar',
             to: 'sidecar',
             filter: ['compose.*.yml', 'config.example.yaml']
+          },
+          // Bundle the Hermes `faceplate` plugin so the Hermes Pings settings
+          // page can install it into ~/.hermes/plugins/ with one click.
+          {
+            from: '../hermes-plugin',
+            to: 'hermes-plugin',
+            filter: ['**/*']
           }
         ]
       }

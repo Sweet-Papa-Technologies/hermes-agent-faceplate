@@ -153,6 +153,7 @@ docker run -d \
   --name "$HERMES_NAME" \
   --restart unless-stopped \
   -p "$HERMES_BIND:$PORT:$PORT" \
+  -p "$HERMES_BIND:8643:8643" \
   -v "$HERMES_HOME:/opt/data" \
   "$HERMES_RUN_IMAGE" gateway run >/dev/null
 
