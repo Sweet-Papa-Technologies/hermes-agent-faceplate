@@ -15,6 +15,7 @@
 # Override-able env vars:
 #   LLM_TUNNEL_PORT   (default: 18080)
 #   LITERT_HOME       (default: $HOME/.faceplate — pid + log live here)
+#   CONTAINER_ENGINE  (default: docker — set to 'podman' to use Podman)
 
 set -euo pipefail
 
@@ -23,6 +24,10 @@ HOME_DIR="${LITERT_HOME:-$HOME/.faceplate}"
 PID_FILE="$HOME_DIR/llm-tunnel.pid"
 LOG_FILE="$HOME_DIR/llm-tunnel.log"
 HERMES_CONFIG="$HOME/.hermes/config.yaml"
+
+# Container engine. M1 default = docker (zero behavior change). Override
+# with CONTAINER_ENGINE=podman. Podman migration M5 flips this default.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
 
 if [ -t 1 ]; then
   GREEN=$'\033[1;32m'; YELLOW=$'\033[1;33m'; RED=$'\033[1;31m'; RESET=$'\033[0m'
@@ -137,9 +142,9 @@ fi
 
 # ─── verify reachability from inside the hermes container ─────────────────
 
-if docker ps --format '{{.Names}}' | grep -q '^hermes-personal$'; then
+if "$CONTAINER_ENGINE" ps --format '{{.Names}}' | grep -q '^hermes-personal$'; then
   log "Probing tunnel from inside hermes-personal container…"
-  if docker exec hermes-personal curl -sS -m 5 -o /dev/null \
+  if "$CONTAINER_ENGINE" exec hermes-personal curl -sS -m 5 -o /dev/null \
        -w 'http=%{http_code}\nconnect=%{time_connect}s\n' \
        "http://host.docker.internal:$LLM_TUNNEL_PORT/v1/models"; then
     printf "${GREEN}✓${RESET} container can reach the tunneled LLM\n"

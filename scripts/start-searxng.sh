@@ -18,6 +18,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE="$HERE/searxng/docker-compose.yml"
 
+# Container engine. M1 default = docker (zero behavior change). Override
+# with CONTAINER_ENGINE=podman. Podman migration M5 flips this default.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
+
 if [ -t 1 ]; then
   GREEN=$'\033[1;32m'; YELLOW=$'\033[1;33m'; RED=$'\033[1;31m'; RESET=$'\033[0m'
 else
@@ -27,11 +31,11 @@ log()  { printf "${GREEN}▸${RESET} %s\n" "$*"; }
 warn() { printf "${YELLOW}!${RESET} %s\n" "$*" >&2; }
 err()  { printf "${RED}✗${RESET} %s\n" "$*" >&2; }
 
-command -v docker >/dev/null 2>&1 || { err "docker not found"; exit 1; }
-docker compose version >/dev/null 2>&1 || { err "docker compose plugin not installed"; exit 1; }
+command -v "$CONTAINER_ENGINE" >/dev/null 2>&1 || { err "$CONTAINER_ENGINE not found"; exit 1; }
+"$CONTAINER_ENGINE" compose version >/dev/null 2>&1 || { err "$CONTAINER_ENGINE compose plugin not installed"; exit 1; }
 
 log "Starting SearXNG stack (compose file: $COMPOSE)…"
-docker compose -f "$COMPOSE" up -d
+"$CONTAINER_ENGINE" compose -f "$COMPOSE" up -d
 
 log "Waiting for SearXNG to come up on 127.0.0.1:9080 (up to 30 s)…"
 ok=0
@@ -56,7 +60,7 @@ if curl -fsS -m 10 "http://127.0.0.1:9080/search?q=test&format=json" >/dev/null 
   printf "${GREEN}✓${RESET} JSON endpoint responsive\n"
 else
   warn "JSON endpoint didn't return 200 — maybe the engines are still warming up."
-  warn "Try again in a few seconds, or check: docker logs searxng"
+  warn "Try again in a few seconds, or check: $CONTAINER_ENGINE logs searxng"
 fi
 
 log "Configuring hermes (~/.hermes/config.yaml + ~/.hermes/.env)…"

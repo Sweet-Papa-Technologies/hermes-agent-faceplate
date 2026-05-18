@@ -23,7 +23,6 @@
 // settings panel mount; both install + restartHermes are idempotent.
 
 import { app, ipcMain } from 'electron';
-import { spawn } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -37,6 +36,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+import { runEngine, ensureRuntime, type EngineRun } from './container-runtime';
 import {
   IPC,
   type AgentPushInstallPreview,
@@ -156,51 +156,6 @@ function atomicWrite(targetPath: string, content: string): void {
 
 // ── docker discovery ───────────────────────────────────────────────────
 
-interface DockerRun {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-function runDocker(args: string[], timeoutMs = 15_000): Promise<DockerRun> {
-  return new Promise((resolve, reject) => {
-    let proc;
-    try {
-      proc = spawn('docker', args);
-    } catch (err) {
-      reject(err instanceof Error ? err : new Error(String(err)));
-      return;
-    }
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try {
-        proc.kill('SIGKILL');
-      } catch {
-        /* noop */
-      }
-      reject(new Error(`docker ${args[0]} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    proc.stdout.on('data', (b: Buffer) => { stdout += b.toString('utf8'); });
-    proc.stderr.on('data', (b: Buffer) => { stderr += b.toString('utf8'); });
-    proc.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ code: code ?? -1, stdout, stderr });
-    });
-  });
-}
-
 /** Heuristic match: anything whose name OR image contains a known Hermes
  *  string, ranked so 'hermes-agent' / 'tirith' beat looser matches. */
 const HERMES_MATCHERS: Array<{ pattern: RegExp; priority: number }> = [
@@ -219,12 +174,15 @@ function scoreMatch(name: string, image: string): number {
 }
 
 async function findHermesContainer(): Promise<HermesContainerCandidate | null> {
-  let result: DockerRun;
+  let result: EngineRun;
   try {
     // Format: "name<TAB>image<TAB>state". `-a` so we also pick up stopped
     // containers — they're valid restart targets if the user previously
     // stopped Hermes.
-    result = await runDocker(['ps', '-a', '--format', '{{.Names}}\t{{.Image}}\t{{.State}}']);
+    result = await runEngine(
+      ['ps', '-a', '--format', '{{.Names}}\t{{.Image}}\t{{.State}}'],
+      { timeoutMs: 15_000 },
+    );
   } catch {
     return null;
   }
@@ -259,7 +217,7 @@ async function findHermesContainer(): Promise<HermesContainerCandidate | null> {
   };
 }
 
-function diagnoseDockerError(action: string, r: DockerRun): string {
+function diagnoseDockerError(action: string, r: EngineRun): string {
   const blob = `${r.stderr}\n${r.stdout}`.toLowerCase();
   const tail = (r.stderr || r.stdout).trim().slice(-280);
   if (blob.includes('cannot connect to the docker daemon') || blob.includes('is the docker daemon running')) {
@@ -391,9 +349,11 @@ export async function restartHermesContainer(name: string): Promise<RestartHerme
   if (!name || /[\s/\\]/.test(name)) {
     return { ok: false, container: name, error: 'invalid container name' };
   }
-  let run: DockerRun;
+  let run: EngineRun;
   try {
-    run = await runDocker(['restart', name], 60_000);
+    // No-op under docker (M1 default) / Linux; ensures the podman VM is up.
+    await ensureRuntime();
+    run = await runEngine(['restart', name], { timeoutMs: 60_000 });
   } catch (err) {
     return {
       ok: false,

@@ -126,6 +126,13 @@ const kokoro: FaceplatePreload['kokoro'] = {
   stop: () => ipcRenderer.invoke(IPC.kokoro.stop),
 };
 
+const podman: FaceplatePreload['podman'] = {
+  status: () => ipcRenderer.invoke(IPC.podman.status),
+  install: () => ipcRenderer.invoke(IPC.podman.install),
+  ensureMachine: () => ipcRenderer.invoke(IPC.podman.ensureMachine),
+  stopMachine: () => ipcRenderer.invoke(IPC.podman.stopMachine),
+};
+
 const agentPush: FaceplatePreload['agentPush'] = {
   onFrame: (cb) => {
     const listener = (
@@ -262,6 +269,7 @@ const api: FaceplatePreload = {
   notify,
   agentPush,
   kokoro,
+  podman,
   typingBar,
   conversations,
   artifacts,

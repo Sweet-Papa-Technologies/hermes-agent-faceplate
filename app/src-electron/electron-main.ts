@@ -38,6 +38,7 @@ import { registerArtifactFixIpc } from './artifact-fix-bridge';
 import { startAgentPushBridge, stopAgentPushBridge } from './agent-push-bridge';
 import { registerAgentPushInstallerIpc } from './agent-push-installer';
 import { registerKokoroIpc } from './kokoro-lifecycle';
+import { registerPodmanIpc } from './podman-installer';
 import {
   ensureBootstrapConversation,
   registerConversationsIpc,
@@ -264,6 +265,7 @@ void app.whenReady().then(() => {
   startAgentPushBridge();
   registerAgentPushInstallerIpc();
   registerKokoroIpc();
+  registerPodmanIpc();
 
   // Catch every webContents (avatar, canvas, settings, …) and route any
   // attempt to open a new window — `target="_blank"`, `window.open()`, or

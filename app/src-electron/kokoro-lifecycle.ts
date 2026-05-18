@@ -15,8 +15,8 @@
 // itself works fine — they just don't get the lifecycle buttons.
 
 import { ipcMain, net } from 'electron';
-import { spawn } from 'node:child_process';
 
+import { runEngine, engineAvailable, ensureRuntime, type EngineRun } from './container-runtime';
 import { IPC, type KokoroStatus } from './preload-api';
 import { getSettings } from './settings-store';
 
@@ -25,49 +25,10 @@ const IMAGE = 'ghcr.io/remsky/kokoro-fastapi-cpu:latest';
 const READY_TIMEOUT_MS = 90_000; // generous: first run pulls ~340 MB
 const POLL_INTERVAL_MS = 1_000;
 
-interface DockerRun {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-function runDocker(args: string[], timeoutMs = 120_000): Promise<DockerRun> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('docker', args);
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try {
-        proc.kill('SIGKILL');
-      } catch {
-        /* noop */
-      }
-      reject(new Error(`docker ${args[0]} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    proc.stdout.on('data', (b: Buffer) => { stdout += b.toString('utf8'); });
-    proc.stderr.on('data', (b: Buffer) => { stderr += b.toString('utf8'); });
-    proc.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ code: code ?? -1, stdout, stderr });
-    });
-  });
-}
-
 /** Pattern-match the most common Docker Desktop failures and rewrite the
  * raw daemon error into something the user can actually act on. Falls
  * back to the raw message when nothing matches. */
-function diagnoseDockerError(action: string, r: DockerRun): string {
+function diagnoseDockerError(action: string, r: EngineRun): string {
   const blob = `${r.stderr}\n${r.stdout}`.toLowerCase();
   const tail = (r.stderr || r.stdout).trim().slice(-280);
   // containerd metadata DB corruption / I/O error — by far the most common
@@ -108,19 +69,14 @@ function diagnoseDockerError(action: string, r: DockerRun): string {
 }
 
 async function dockerAvailable(): Promise<boolean> {
-  try {
-    const r = await runDocker(['--version'], 5_000);
-    return r.code === 0;
-  } catch {
-    return false;
-  }
+  return engineAvailable(5_000);
 }
 
 async function containerState(): Promise<'running' | 'exited' | 'missing'> {
   try {
-    const r = await runDocker(
+    const r = await runEngine(
       ['inspect', '--format', '{{.State.Status}}', CONTAINER_NAME],
-      8_000,
+      { timeoutMs: 8_000 },
     );
     if (r.code !== 0) return 'missing';
     const s = r.stdout.trim();
@@ -199,6 +155,9 @@ export async function getKokoroStatus(): Promise<KokoroStatus> {
 }
 
 export async function ensureKokoroRunning(): Promise<KokoroStatus> {
+  // No-op under docker (M1 default) and Linux; on macOS/Win + podman this
+  // brings the VM up before we try to run the container.
+  await ensureRuntime();
   const before = await getKokoroStatus();
   if (before.reachable) return before; // already up — even if not via our container
   if (!before.docker_available) {
@@ -207,7 +166,7 @@ export async function ensureKokoroRunning(): Promise<KokoroStatus> {
 
   if (before.container_state === 'missing') {
     console.log(`[kokoro] creating ${CONTAINER_NAME} from ${IMAGE}`);
-    const run = await runDocker(
+    const run = await runEngine(
       [
         'run', '-d',
         '--name', CONTAINER_NAME,
@@ -216,14 +175,14 @@ export async function ensureKokoroRunning(): Promise<KokoroStatus> {
         IMAGE,
       ],
       // First run pulls the image (~340 MB) — be patient.
-      300_000,
+      { timeoutMs: 300_000 },
     );
     if (run.code !== 0) {
       throw new Error(diagnoseDockerError('docker run', run));
     }
   } else {
     console.log(`[kokoro] starting existing container ${CONTAINER_NAME}`);
-    const start = await runDocker(['start', CONTAINER_NAME], 30_000);
+    const start = await runEngine(['start', CONTAINER_NAME], { timeoutMs: 30_000 });
     if (start.code !== 0) {
       throw new Error(diagnoseDockerError('docker start', start));
     }
@@ -246,7 +205,7 @@ export async function stopKokoro(): Promise<KokoroStatus> {
   if (!dock) return getKokoroStatus();
   const state = await containerState();
   if (state === 'running') {
-    await runDocker(['stop', CONTAINER_NAME], 30_000).catch((err) => {
+    await runEngine(['stop', CONTAINER_NAME], { timeoutMs: 30_000 }).catch((err) => {
       console.warn('[kokoro] stop failed:', err);
     });
   }

@@ -69,6 +69,40 @@ export interface KokoroStatus {
   base_url: string;
 }
 
+/** State of the `podman machine` VM. `applicable:false` on Linux, where
+ *  Podman is native and no VM exists. Single source of truth — imported
+ *  by podman-machine.ts. */
+export interface PodmanMachineState {
+  applicable: boolean;
+  exists: boolean;
+  running: boolean;
+  name: string;
+}
+
+/** Snapshot the Settings → Podman panel polls. */
+export interface PodmanStatus {
+  platform: 'darwin' | 'win32' | 'linux';
+  /** Resolved container engine. M1 default 'docker' (env-overridable);
+   *  the persisted selector lands in M5. */
+  engine: string;
+  installed: boolean;
+  version: string | null;
+  /** null when Podman isn't installed. */
+  machine: PodmanMachineState | null;
+  /** engine===podman && installed && (Linux || machine running). */
+  ready: boolean;
+}
+
+export interface PodmanInstallResult {
+  ok: boolean;
+  steps: string[];
+  /** Linux: the exact `sudo` command for the user to run themselves. */
+  manual_command?: string;
+  /** macOS/Windows fallback: where to get the official installer. */
+  help_url?: string;
+  error?: string;
+}
+
 /** Frame shape pushed by the Hermes faceplate plugin's WebSocket server.
  * Mirrors hermes-plugin/faceplate/adapter.py's send-side JSON. */
 export interface AgentPushFrame {
@@ -230,6 +264,8 @@ export interface TestResult {
 export interface SidecarStatus {
   up: boolean;
   build: SidecarBuild;
+  /** Configured sidecar base URL (shown as a chip in the wizard). */
+  url: string;
   models?: Record<string, 'loaded' | 'idle' | 'error'>;
   ram_mb?: number;
   version?: string;
@@ -365,6 +401,18 @@ export interface FaceplatePreload {
     ensure(): Promise<KokoroStatus>;
     /** Stop the container without removing it. Idempotent. */
     stop(): Promise<KokoroStatus>;
+  };
+  podman: {
+    /** Detection + machine state. Safe to poll on panel mount. */
+    status(): Promise<PodmanStatus>;
+    /** Guided install (Homebrew on macOS, winget on Windows; Linux
+     *  returns a manual `sudo` command — never auto-escalates). */
+    install(): Promise<PodmanInstallResult>;
+    /** Ensure the `podman machine` VM exists + is running (macOS/Win).
+     *  Long-running on first init (~1 GB image). Linux → no-op. */
+    ensureMachine(): Promise<PodmanMachineState>;
+    /** Stop the VM (explicit user action). */
+    stopMachine(): Promise<PodmanMachineState>;
   };
   notify: {
     /** Fire an OS notification. The main process gates on settings
@@ -529,6 +577,16 @@ export const IPC = {
     ensure: 'faceplate:kokoro:ensure',
     /** Stop (but keep) the container — next ensure() will `docker start`. */
     stop: 'faceplate:kokoro:stop',
+  },
+  podman: {
+    /** renderer → main: detection + machine state. */
+    status: 'faceplate:podman:status',
+    /** renderer → main: guided Podman install. */
+    install: 'faceplate:podman:install',
+    /** renderer → main: ensure the podman machine VM is up. */
+    ensureMachine: 'faceplate:podman:ensure-machine',
+    /** renderer → main: stop the podman machine VM. */
+    stopMachine: 'faceplate:podman:stop-machine',
   },
   platform: {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',

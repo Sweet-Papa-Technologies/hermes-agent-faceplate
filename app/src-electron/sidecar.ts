@@ -7,21 +7,15 @@
 // quasar.config.ts → electron.builder.extraResources).
 
 import { app, ipcMain, net } from 'electron';
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runEngineCompose, ensureRuntime } from './container-runtime';
 import { IPC, type SidecarStatus, type SidecarBuild } from './preload-api';
 import { getSettings } from './settings-store';
 
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
-
-interface ComposeRun {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
 
 function composeFileFor(image: SidecarBuild): string {
   const filename = `compose.${image}.yml`;
@@ -37,25 +31,12 @@ function composeFileFor(image: SidecarBuild): string {
   return path.join(currentDir, 'sidecar', filename);
 }
 
-function runCompose(args: string[], composeFile: string): Promise<ComposeRun> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('docker', ['compose', '-f', composeFile, ...args], {
-      env: {
-        ...process.env,
-        FACEPLATE_API_KEY: getSettings().speech.sidecar_token || '',
-      },
-    });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (b: Buffer) => {
-      stdout += b.toString('utf8');
-    });
-    proc.stderr.on('data', (b: Buffer) => {
-      stderr += b.toString('utf8');
-    });
-    proc.on('error', (err) => reject(err));
-    proc.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
-  });
+/** The old `runCompose` always injected FACEPLATE_API_KEY for *both* `up`
+ *  and `down`; preserve that exactly (the compose file references it, and
+ *  `down` resolving it avoids a compose interpolation warning). No timeout
+ *  — matching the old runner, since `up` may pull large images. */
+function composeEnv(): Record<string, string> {
+  return { FACEPLATE_API_KEY: getSettings().speech.sidecar_token || '' };
 }
 
 export async function startSidecar(): Promise<void> {
@@ -67,7 +48,9 @@ export async function startSidecar(): Promise<void> {
   if (!existsSync(composeFile)) {
     throw new Error(`Compose file not found: ${composeFile}`);
   }
-  const result = await runCompose(['up', '-d'], composeFile);
+  // No-op under docker (M1 default) / Linux; ensures the podman VM is up.
+  await ensureRuntime();
+  const result = await runEngineCompose(['up', '-d'], composeFile, { env: composeEnv() });
   if (result.code !== 0) {
     throw new Error(`docker compose up failed (exit ${result.code}): ${result.stderr.slice(0, 240)}`);
   }
@@ -77,19 +60,20 @@ export async function stopSidecar(): Promise<void> {
   const settings = getSettings();
   const composeFile = composeFileFor(settings.speech.sidecar_image);
   if (!existsSync(composeFile)) return;
-  await runCompose(['down'], composeFile);
+  await runEngineCompose(['down'], composeFile, { env: composeEnv() });
 }
 
 export async function sidecarStatus(): Promise<SidecarStatus> {
   const settings = getSettings();
-  const url = `${settings.speech.sidecar_url.replace(/\/+$/, '')}/health`;
+  const baseUrl = settings.speech.sidecar_url.replace(/\/+$/, '');
+  const url = `${baseUrl}/health`;
   const headers: Record<string, string> = {};
   if (settings.speech.sidecar_token) {
     headers.authorization = `Bearer ${settings.speech.sidecar_token}`;
   }
   try {
     const res = await net.fetch(url, { headers, signal: AbortSignal.timeout(2_000) });
-    if (!res.ok) return { up: false, build: settings.speech.sidecar_image };
+    if (!res.ok) return { up: false, build: settings.speech.sidecar_image, url: baseUrl };
     const json = (await res.json()) as {
       models?: Record<string, 'loaded' | 'idle' | 'error'>;
       ram_mb?: number;
@@ -98,12 +82,13 @@ export async function sidecarStatus(): Promise<SidecarStatus> {
     return {
       up: true,
       build: settings.speech.sidecar_image,
+      url: baseUrl,
       ...(json.models ? { models: json.models } : {}),
       ...(json.ram_mb !== undefined ? { ram_mb: json.ram_mb } : {}),
       ...(json.version ? { version: json.version } : {}),
     };
   } catch {
-    return { up: false, build: settings.speech.sidecar_image };
+    return { up: false, build: settings.speech.sidecar_image, url: baseUrl };
   }
 }
 

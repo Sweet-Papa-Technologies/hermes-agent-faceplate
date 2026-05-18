@@ -21,8 +21,14 @@
 #   HERMES_SKIP_BUILD  (default: unset; set to "1" to skip the local build
 #                       and run the base image directly — browser tools
 #                       won't work but startup is faster)
+#   CONTAINER_ENGINE   (default: docker — set to 'podman' to use Podman.
+#                       Podman migration M5 flips this default to podman.)
 
 set -euo pipefail
+
+# Container engine. M1 default = docker (zero behavior change). Override
+# with CONTAINER_ENGINE=podman. podman's CLI is drop-in for these verbs.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
 
 # Two image identifiers:
 #   - BASE: what we pull from the registry (upstream)
@@ -57,7 +63,7 @@ err()  { printf "${RED}✗${RESET} %s\n" "$*" >&2; }
 
 # ─── prereqs ──────────────────────────────────────────────────────────────
 
-command -v docker >/dev/null 2>&1 || { err "docker not found"; exit 1; }
+command -v "$CONTAINER_ENGINE" >/dev/null 2>&1 || { err "$CONTAINER_ENGINE not found"; exit 1; }
 command -v curl   >/dev/null 2>&1 || { err "curl not found";   exit 1; }
 
 # ─── ~/.hermes/.env ───────────────────────────────────────────────────────
@@ -115,14 +121,14 @@ fi
 
 # ─── recreate container ───────────────────────────────────────────────────
 
-if docker ps -a --format '{{.Names}}' | grep -qx "$HERMES_NAME"; then
+if "$CONTAINER_ENGINE" ps -a --format '{{.Names}}' | grep -qx "$HERMES_NAME"; then
   log "Removing existing container '$HERMES_NAME' (volume at $HERMES_HOME is preserved)…"
-  docker rm -f "$HERMES_NAME" >/dev/null
+  "$CONTAINER_ENGINE" rm -f "$HERMES_NAME" >/dev/null
 fi
 
-if ! docker image inspect "$HERMES_BASE_IMAGE" >/dev/null 2>&1; then
+if ! "$CONTAINER_ENGINE" image inspect "$HERMES_BASE_IMAGE" >/dev/null 2>&1; then
   log "Pulling $HERMES_BASE_IMAGE (one-time)…"
-  docker pull "$HERMES_BASE_IMAGE"
+  "$CONTAINER_ENGINE" pull "$HERMES_BASE_IMAGE"
 fi
 
 # Build the local image that bakes in agent-browser + chromium so the
@@ -138,7 +144,7 @@ elif [ ! -f "$DOCKERFILE_DIR/Dockerfile" ]; then
   HERMES_RUN_IMAGE="$HERMES_BASE_IMAGE"
 else
   log "Building $HERMES_LOCAL_TAG on top of $HERMES_BASE_IMAGE (browser + agent-browser CLI)…"
-  docker build \
+  "$CONTAINER_ENGINE" build \
     --build-arg "HERMES_BASE=$HERMES_BASE_IMAGE" \
     -t "$HERMES_LOCAL_TAG" \
     "$DOCKERFILE_DIR" >/dev/null
@@ -149,7 +155,7 @@ log "Starting $HERMES_NAME on $HERMES_BIND:$PORT (mount $HERMES_HOME → /opt/da
 # entrypoint is the interactive `hermes chat` REPL, which exits immediately
 # under -d (no TTY). `gateway run` launches the persistent API server.
 # Source: https://hermes-agent.nousresearch.com/docs/user-guide/docker
-docker run -d \
+"$CONTAINER_ENGINE" run -d \
   --name "$HERMES_NAME" \
   --restart unless-stopped \
   -p "$HERMES_BIND:$PORT:$PORT" \
@@ -167,7 +173,7 @@ for i in $(seq 1 60); do
     break
   fi
   if [ "$i" = "60" ]; then
-    err "hermes-agent didn't pass /v1/health in 60 s. Check 'docker logs $HERMES_NAME'."
+    err "hermes-agent didn't pass /v1/health in 60 s. Check '$CONTAINER_ENGINE logs $HERMES_NAME'."
     exit 1
   fi
   sleep 1
@@ -188,8 +194,8 @@ ${GREEN}─── hermes-agent running ───${RESET}
 
     ${GREEN}$KEY${RESET}
 
-  Logs:    docker logs -f $HERMES_NAME
-  Stop:    docker rm -f $HERMES_NAME
+  Logs:    $CONTAINER_ENGINE logs -f $HERMES_NAME
+  Stop:    $CONTAINER_ENGINE rm -f $HERMES_NAME
   Restart: $0
 
 DONE

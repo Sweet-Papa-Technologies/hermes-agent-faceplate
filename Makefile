@@ -23,6 +23,10 @@ HERMES_URL      ?= http://127.0.0.1:8642
 HERMES_KEY      ?=
 SIDECAR_URL     ?= http://127.0.0.1:8080
 
+# Container engine. M1 default = docker (zero behavior change). Override
+# with `make ENGINE=podman …`. Podman migration M5 flips this default.
+ENGINE          ?= docker
+
 GREEN  := \033[1;32m
 YELLOW := \033[1;33m
 RED    := \033[1;31m
@@ -46,8 +50,8 @@ help:                ## list targets
 	@echo "  HERMES_KEY=...                       (default: read from ~/.hermes/.env)"
 
 check-prereqs:       ## verify docker, pnpm, node are installed
-	@command -v docker >/dev/null 2>&1 || { printf "$(RED)docker not found$(RESET) — install Docker Desktop or podman\n"; exit 1; }
-	@docker compose version >/dev/null 2>&1 || { printf "$(RED)docker compose plugin not found$(RESET)\n"; exit 1; }
+	@command -v $(ENGINE) >/dev/null 2>&1 || { printf "$(RED)$(ENGINE) not found$(RESET) — install Docker Desktop or podman\n"; exit 1; }
+	@$(ENGINE) compose version >/dev/null 2>&1 || { printf "$(RED)$(ENGINE) compose plugin not found$(RESET)\n"; exit 1; }
 	@command -v pnpm >/dev/null 2>&1 || { printf "$(RED)pnpm not found$(RESET) — \`npm install -g pnpm\`\n"; exit 1; }
 	@command -v node >/dev/null 2>&1 || { printf "$(RED)node not found$(RESET)\n"; exit 1; }
 	@printf "$(GREEN)✓ prereqs ok$(RESET)\n"
@@ -82,17 +86,17 @@ up:                  ## start the sidecar (Docker)
 		printf "$(RED)Run \`make setup\` first.$(RESET)\n"; exit 1; \
 	fi
 	@FACEPLATE_API_KEY="$$(cat $(KEY_CACHE))" \
-		docker compose -f "$(COMPOSE_FILE)" up -d --build
+		$(ENGINE) compose -f "$(COMPOSE_FILE)" up -d --build
 	@printf "$(GREEN)✓$(RESET) sidecar starting in background. Tail logs with \`make logs\`.\n"
 
 down:                ## stop the sidecar
-	@docker compose -f "$(COMPOSE_FILE)" down
+	@$(ENGINE) compose -f "$(COMPOSE_FILE)" down
 	@printf "$(GREEN)✓$(RESET) sidecar stopped\n"
 
 restart: down up     ## bounce the sidecar
 
 logs:                ## tail sidecar logs (Ctrl+C to detach)
-	@docker compose -f "$(COMPOSE_FILE)" logs -f sidecar
+	@$(ENGINE) compose -f "$(COMPOSE_FILE)" logs -f sidecar
 
 app:                 ## run the Faceplate Electron dev build
 	@cd "$(APP_DIR)" && pnpm dev
@@ -127,19 +131,19 @@ verify:              ## health-check hermes + the sidecar
 clean:               ## stop sidecar + drop its volumes (models cache included)
 	@read -p "This deletes sidecar volumes (models, voices, wakewords). Continue? [y/N] " yn; \
 		[ "$$yn" = "y" ] || { echo "aborted"; exit 0; }
-	@docker compose -f "$(COMPOSE_FILE)" down -v
+	@$(ENGINE) compose -f "$(COMPOSE_FILE)" down -v
 	@printf "$(GREEN)✓$(RESET) volumes removed\n"
 
 hermes-up:           ## start hermes-agent in Docker (idempotent — recreates on re-run)
 	@bash $(HERE)/scripts/start-hermes.sh
 
 hermes-down:         ## stop the hermes-agent container (volume preserved)
-	@docker rm -f hermes-personal 2>/dev/null && \
+	@$(ENGINE) rm -f hermes-personal 2>/dev/null && \
 		printf "$(GREEN)✓$(RESET) hermes-personal stopped\n" || \
 		printf "$(YELLOW)·$(RESET) hermes-personal wasn't running\n"
 
 hermes-logs:         ## tail container stdout (gateway banner only — most activity is in agent.log)
-	@docker logs -f hermes-personal
+	@$(ENGINE) logs -f hermes-personal
 
 hermes-agent-log:    ## tail ~/.hermes/logs/agent.log (HTTP access + agent-loop info)
 	@if [ -f $(HOME)/.hermes/logs/agent.log ]; then \
@@ -226,15 +230,15 @@ searxng-up:          ## start SearXNG on 127.0.0.1:9080 + configure hermes to us
 	@bash $(HERE)/scripts/start-searxng.sh
 
 searxng-down:        ## stop SearXNG (volumes preserved)
-	@docker compose -f $(SEARXNG_COMPOSE) down 2>/dev/null && \
+	@$(ENGINE) compose -f $(SEARXNG_COMPOSE) down 2>/dev/null && \
 		printf "$(GREEN)✓$(RESET) searxng stopped\n" || \
 		printf "$(YELLOW)·$(RESET) searxng wasn't running\n"
 
 searxng-logs:        ## tail searxng container logs
-	@docker compose -f $(SEARXNG_COMPOSE) logs -f searxng
+	@$(ENGINE) compose -f $(SEARXNG_COMPOSE) logs -f searxng
 
 searxng-status:      ## show searxng status
-	@if docker ps --format '{{.Names}}' | grep -qx searxng; then \
+	@if $(ENGINE) ps --format '{{.Names}}' | grep -qx searxng; then \
 		printf "$(GREEN)✓$(RESET) searxng running on http://127.0.0.1:9080\n"; \
 	else \
 		printf "$(RED)✗$(RESET) searxng not running\n"; \
