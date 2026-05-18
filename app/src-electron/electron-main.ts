@@ -39,6 +39,7 @@ import { startAgentPushBridge, stopAgentPushBridge } from './agent-push-bridge';
 import { registerAgentPushInstallerIpc } from './agent-push-installer';
 import { registerKokoroIpc } from './kokoro-lifecycle';
 import { registerPodmanIpc } from './podman-installer';
+import { registerHermesLifecycleIpc } from './hermes-lifecycle';
 import {
   ensureBootstrapConversation,
   registerConversationsIpc,
@@ -266,6 +267,7 @@ void app.whenReady().then(() => {
   registerAgentPushInstallerIpc();
   registerKokoroIpc();
   registerPodmanIpc();
+  registerHermesLifecycleIpc();
 
   // Catch every webContents (avatar, canvas, settings, …) and route any
   // attempt to open a new window — `target="_blank"`, `window.open()`, or

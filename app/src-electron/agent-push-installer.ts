@@ -23,20 +23,19 @@
 // settings panel mount; both install + restartHermes are idempotent.
 
 import { app, ipcMain } from 'electron';
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { runEngine, ensureRuntime, type EngineRun } from './container-runtime';
+import {
+  hermesHome,
+  envPath,
+  readEnvFile,
+  appendEnvVars,
+  atomicWrite,
+} from './hermes-env';
 import {
   IPC,
   type AgentPushInstallPreview,
@@ -44,7 +43,7 @@ import {
   type HermesContainerCandidate,
   type RestartHermesResult,
 } from './preload-api';
-import { applyPatch, getSettings } from './settings-store';
+import { applyPatch } from './settings-store';
 
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -58,24 +57,8 @@ const DEFAULT_ENV_VALUES: Record<EnvKey, () => string> = {
 };
 
 // ── path resolution ─────────────────────────────────────────────────────
-
-function expand(p: string): string {
-  if (p.startsWith('~')) return path.join(os.homedir(), p.slice(1));
-  return p;
-}
-
-function hermesHome(): string {
-  if (process.env.HERMES_HOME) return process.env.HERMES_HOME;
-  const fromSettings = getSettings().hermes.config_path;
-  if (fromSettings && fromSettings.endsWith('config.yaml')) {
-    return path.dirname(expand(fromSettings));
-  }
-  return path.join(os.homedir(), '.hermes');
-}
-
-function envPath(): string {
-  return path.join(hermesHome(), '.env');
-}
+// hermesHome() / envPath() / .env helpers now live in hermes-env.ts (shared
+// with hermes-lifecycle.ts). Plugin-source/dest resolution stays here.
 
 function pluginDstDir(): string {
   return path.join(hermesHome(), 'plugins', 'faceplate');
@@ -97,62 +80,7 @@ function pluginSrcDir(): string {
   return path.join(currentDir, 'hermes-plugin', 'faceplate');
 }
 
-// ── .env parsing ────────────────────────────────────────────────────────
-
-/** Loose .env parser. Picks up `KEY=value` lines, ignores comments and
- *  malformed lines. We don't try to evaluate shell expansion — `${FOO}` in
- *  values comes back literal. That's fine for our three vars (none of which
- *  the user would reasonably nest). */
-function parseEnvFile(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    // Strip surrounding quotes — both single and double, single layer.
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (key) out[key] = value;
-  }
-  return out;
-}
-
-function readEnvFile(): { text: string; vars: Record<string, string> } {
-  const p = envPath();
-  if (!existsSync(p)) return { text: '', vars: {} };
-  try {
-    const text = readFileSync(p, 'utf8');
-    return { text, vars: parseEnvFile(text) };
-  } catch {
-    return { text: '', vars: {} };
-  }
-}
-
-/** Append-only env writer: never rewrites existing lines, just appends a
- *  block of new `KEY=value` lines at the end. Preserves comments, ordering,
- *  and any custom values the user set by hand. */
-function appendEnvVars(currentText: string, additions: Array<{ key: string; value: string }>): string {
-  if (additions.length === 0) return currentText;
-  const trail = currentText.endsWith('\n') || currentText === '' ? '' : '\n';
-  const banner = '\n# Added by HermesAgent Faceplate (Hermes Pings setup)';
-  const body = additions.map(({ key, value }) => `${key}=${value}`).join('\n');
-  return `${currentText}${trail}${banner}\n${body}\n`;
-}
-
-function atomicWrite(targetPath: string, content: string): void {
-  const dir = path.dirname(targetPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const tmp = `${targetPath}.faceplate.tmp`;
-  writeFileSync(tmp, content, 'utf8');
-  renameSync(tmp, targetPath);
-}
+// .env parse/read/append/atomicWrite now imported from hermes-env.ts.
 
 // ── docker discovery ───────────────────────────────────────────────────
 

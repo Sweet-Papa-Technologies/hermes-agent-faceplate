@@ -103,6 +103,26 @@ export interface PodmanInstallResult {
   error?: string;
 }
 
+/** App-managed Hermes Agent container state (hermes-lifecycle.ts). */
+export interface HermesAgentStatus {
+  engine: string;
+  engine_available: boolean;
+  container_state: 'running' | 'exited' | 'missing';
+  /** /v1/health answered — true even for a bring-your-own Hermes the app
+   *  doesn't manage. */
+  reachable: boolean;
+  base_url: string;
+  /** The browser-augmented local image exists. */
+  image_built: boolean;
+}
+
+export interface HermesAgentInstallResult {
+  ok: boolean;
+  steps: string[];
+  status: HermesAgentStatus | null;
+  error?: string;
+}
+
 /** Frame shape pushed by the Hermes faceplate plugin's WebSocket server.
  * Mirrors hermes-plugin/faceplate/adapter.py's send-side JSON. */
 export interface AgentPushFrame {
@@ -303,6 +323,13 @@ export interface FaceplatePreload {
     hookPreview(): Promise<HookPreview>;
     hookInstall(): Promise<HookInstallResult>;
     hookUninstall(): Promise<HookInstallResult>;
+    /** App-managed Hermes Agent container (M3). */
+    agentStatus(): Promise<HermesAgentStatus>;
+    /** One-click install: pull base → build browser image → run →
+     *  health-poll. Long-running (~6 GB image on first call). */
+    installAgent(): Promise<HermesAgentInstallResult>;
+    /** Remove the managed container (data volume ~/.hermes preserved). */
+    stopAgent(): Promise<HermesAgentStatus>;
   };
   window: {
     setClickThrough(enabled: boolean): Promise<void>;
@@ -517,6 +544,9 @@ export const IPC = {
     hookPreview: 'faceplate:hermes:hook-preview',
     hookInstall: 'faceplate:hermes:hook-install',
     hookUninstall: 'faceplate:hermes:hook-uninstall',
+    agentStatus: 'faceplate:hermes:agent-status',
+    agentInstall: 'faceplate:hermes:agent-install',
+    agentStop: 'faceplate:hermes:agent-stop',
   },
   window: {
     setClickThrough: 'faceplate:window:set-click-through',

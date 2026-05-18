@@ -48,6 +48,9 @@ const hermes: FaceplatePreload['hermes'] = {
   hookPreview: () => ipcRenderer.invoke(IPC.hermes.hookPreview),
   hookInstall: () => ipcRenderer.invoke(IPC.hermes.hookInstall),
   hookUninstall: () => ipcRenderer.invoke(IPC.hermes.hookUninstall),
+  agentStatus: () => ipcRenderer.invoke(IPC.hermes.agentStatus),
+  installAgent: () => ipcRenderer.invoke(IPC.hermes.agentInstall),
+  stopAgent: () => ipcRenderer.invoke(IPC.hermes.agentStop),
 };
 
 const win: FaceplatePreload['window'] = {

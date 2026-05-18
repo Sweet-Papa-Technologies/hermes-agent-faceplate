@@ -90,6 +90,69 @@
       <pre class="cmd">{{ manualCommand }}</pre>
     </q-banner>
 
+    <h2 class="q-mt-lg">Hermes Agent</h2>
+    <p class="muted">
+      Don't have Hermes Agent yet? Install + run it in a container here. If
+      you already run Hermes yourself (any engine), this auto-detects it —
+      just use the Connection tab and skip the install.
+    </p>
+
+    <q-card flat bordered class="card">
+      <q-card-section>
+        <div class="row items-center q-gutter-sm">
+          <q-chip
+            v-if="agent?.reachable"
+            color="positive"
+            text-color="white"
+            dense
+          >
+            Reachable at {{ agent.base_url }}
+          </q-chip>
+          <q-chip v-else color="grey-7" text-color="white" dense>
+            Not reachable
+          </q-chip>
+          <q-chip
+            v-if="agent && agent.container_state !== 'missing'"
+            :color="agent.container_state === 'running' ? 'positive' : 'warning'"
+            text-color="white"
+            dense
+          >
+            Container: {{ agent.container_state }}
+          </q-chip>
+          <q-chip v-if="agent?.image_built" color="grey-8" text-color="white" dense>
+            browser image built
+          </q-chip>
+          <q-space />
+        </div>
+      </q-card-section>
+
+      <q-separator />
+
+      <q-card-section class="row q-gutter-sm">
+        <q-btn
+          no-caps
+          color="primary"
+          icon="rocket_launch"
+          :label="agent?.reachable ? 'Reinstall / recreate' : 'Install Hermes Agent'"
+          :loading="hermesBusy"
+          @click="onInstallHermes"
+        />
+        <q-btn
+          v-if="agent && agent.container_state !== 'missing'"
+          no-caps
+          flat
+          icon="delete"
+          label="Remove container"
+          :loading="hermesBusy"
+          @click="onStopHermes"
+        />
+      </q-card-section>
+
+      <q-card-section v-if="hermesSteps.length" class="steps">
+        <div v-for="(s, i) in hermesSteps" :key="i" class="step">▸ {{ s }}</div>
+      </q-card-section>
+    </q-card>
+
     <p class="muted q-mt-md">
       First machine creation downloads a ~1&nbsp;GB VM image and the Hermes
       image is ~6&nbsp;GB — keep at least 20&nbsp;GB free. Default engine is
@@ -103,7 +166,10 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useQuasar } from 'quasar';
 
-import type { PodmanStatus } from '../../../src-electron/preload-api';
+import type {
+  PodmanStatus,
+  HermesAgentStatus,
+} from '../../../src-electron/preload-api';
 
 const $q = useQuasar();
 const status = ref<PodmanStatus | null>(null);
@@ -112,6 +178,10 @@ const installing = ref(false);
 const machineBusy = ref(false);
 const lastSteps = ref<string[]>([]);
 const manualCommand = ref<string | null>(null);
+
+const agent = ref<HermesAgentStatus | null>(null);
+const hermesBusy = ref(false);
+const hermesSteps = ref<string[]>([]);
 
 const engineHint = computed(() => {
   const s = status.value;
@@ -130,9 +200,51 @@ async function refresh(): Promise<void> {
   if (!window.faceplate) return;
   checking.value = true;
   try {
-    status.value = await window.faceplate.podman.status();
+    const [p, a] = await Promise.all([
+      window.faceplate.podman.status(),
+      window.faceplate.hermes.agentStatus(),
+    ]);
+    status.value = p;
+    agent.value = a;
   } finally {
     checking.value = false;
+  }
+}
+
+async function onInstallHermes(): Promise<void> {
+  const fp = window.faceplate;
+  if (!fp) return;
+  hermesBusy.value = true;
+  hermesSteps.value = [];
+  try {
+    const r = await fp.hermes.installAgent();
+    hermesSteps.value = r.steps;
+    if (r.ok) {
+      $q.notify({ type: 'positive', message: 'Hermes Agent is up.', timeout: 5000 });
+    } else {
+      $q.notify({ type: 'negative', message: r.error ?? 'Install failed.', timeout: 9000 });
+    }
+  } catch (err) {
+    $q.notify({
+      type: 'negative',
+      message: err instanceof Error ? err.message : String(err),
+      timeout: 9000,
+    });
+  } finally {
+    hermesBusy.value = false;
+    void refresh();
+  }
+}
+
+async function onStopHermes(): Promise<void> {
+  const fp = window.faceplate;
+  if (!fp) return;
+  hermesBusy.value = true;
+  try {
+    await fp.hermes.stopAgent();
+  } finally {
+    hermesBusy.value = false;
+    void refresh();
   }
 }
 

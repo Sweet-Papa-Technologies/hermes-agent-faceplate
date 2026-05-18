@@ -14,7 +14,6 @@ APP_DIR        := $(HERE)/app
 # get included in the variable value as trailing whitespace, so keep this
 # on a clean line of its own.
 SIDECAR_VARIANT ?= cpu
-COMPOSE_FILE    := $(SIDECAR_DIR)/compose.$(SIDECAR_VARIANT).yml
 CONFIG_FILE     := $(SIDECAR_DIR)/config.yaml
 EXAMPLE_CONFIG  := $(SIDECAR_DIR)/config.example.yaml
 KEY_CACHE       := $(SIDECAR_DIR)/.faceplate-api-key
@@ -51,7 +50,6 @@ help:                ## list targets
 
 check-prereqs:       ## verify docker, pnpm, node are installed
 	@command -v $(ENGINE) >/dev/null 2>&1 || { printf "$(RED)$(ENGINE) not found$(RESET) — install Docker Desktop or podman\n"; exit 1; }
-	@$(ENGINE) compose version >/dev/null 2>&1 || { printf "$(RED)$(ENGINE) compose plugin not found$(RESET)\n"; exit 1; }
 	@command -v pnpm >/dev/null 2>&1 || { printf "$(RED)pnpm not found$(RESET) — \`npm install -g pnpm\`\n"; exit 1; }
 	@command -v node >/dev/null 2>&1 || { printf "$(RED)node not found$(RESET)\n"; exit 1; }
 	@printf "$(GREEN)✓ prereqs ok$(RESET)\n"
@@ -81,22 +79,24 @@ setup: check-prereqs ## one-time bootstrap: configs + tokens + dependencies
 	@printf "  3. Walk the wizard. Sidecar token to paste in Settings → Speech Sidecar:\n"
 	@printf "     $(GREEN)$$(cat $(KEY_CACHE))$(RESET)\n"
 
-up:                  ## start the sidecar (Docker)
+up:                  ## start the sidecar (plain container; no compose)
 	@if [ ! -f "$(KEY_CACHE)" ]; then \
 		printf "$(RED)Run \`make setup\` first.$(RESET)\n"; exit 1; \
 	fi
-	@FACEPLATE_API_KEY="$$(cat $(KEY_CACHE))" \
-		$(ENGINE) compose -f "$(COMPOSE_FILE)" up -d --build
-	@printf "$(GREEN)✓$(RESET) sidecar starting in background. Tail logs with \`make logs\`.\n"
+	@CONTAINER_ENGINE="$(ENGINE)" SIDECAR_VARIANT="$(SIDECAR_VARIANT)" \
+		FACEPLATE_API_KEY="$$(cat $(KEY_CACHE))" \
+		bash $(HERE)/scripts/start-sidecar.sh
+	@printf "$(GREEN)✓$(RESET) sidecar started. Tail logs with \`make logs\`.\n"
 
-down:                ## stop the sidecar
-	@$(ENGINE) compose -f "$(COMPOSE_FILE)" down
-	@printf "$(GREEN)✓$(RESET) sidecar stopped\n"
+down:                ## stop the sidecar (named volumes preserved)
+	@$(ENGINE) rm -f faceplate-sidecar >/dev/null 2>&1 && \
+		printf "$(GREEN)✓$(RESET) sidecar stopped\n" || \
+		printf "$(YELLOW)·$(RESET) sidecar wasn't running\n"
 
 restart: down up     ## bounce the sidecar
 
 logs:                ## tail sidecar logs (Ctrl+C to detach)
-	@$(ENGINE) compose -f "$(COMPOSE_FILE)" logs -f sidecar
+	@$(ENGINE) logs -f faceplate-sidecar
 
 app:                 ## run the Faceplate Electron dev build
 	@cd "$(APP_DIR)" && pnpm dev
@@ -131,7 +131,8 @@ verify:              ## health-check hermes + the sidecar
 clean:               ## stop sidecar + drop its volumes (models cache included)
 	@read -p "This deletes sidecar volumes (models, voices, wakewords). Continue? [y/N] " yn; \
 		[ "$$yn" = "y" ] || { echo "aborted"; exit 0; }
-	@$(ENGINE) compose -f "$(COMPOSE_FILE)" down -v
+	@$(ENGINE) rm -f faceplate-sidecar >/dev/null 2>&1 || true
+	@$(ENGINE) volume rm faceplate-models faceplate-voices faceplate-wakewords >/dev/null 2>&1 || true
 	@printf "$(GREEN)✓$(RESET) volumes removed\n"
 
 hermes-up:           ## start hermes-agent in Docker (idempotent — recreates on re-run)
@@ -224,18 +225,16 @@ llm-tunnel-logs:     ## tail llm-tunnel log
 
 # ─── searxng (free local web search backend for hermes) ─────────────────
 
-SEARXNG_COMPOSE := $(HERE)/searxng/docker-compose.yml
-
 searxng-up:          ## start SearXNG on 127.0.0.1:9080 + configure hermes to use it
-	@bash $(HERE)/scripts/start-searxng.sh
+	@CONTAINER_ENGINE="$(ENGINE)" bash $(HERE)/scripts/start-searxng.sh
 
-searxng-down:        ## stop SearXNG (volumes preserved)
-	@$(ENGINE) compose -f $(SEARXNG_COMPOSE) down 2>/dev/null && \
-		printf "$(GREEN)✓$(RESET) searxng stopped\n" || \
-		printf "$(YELLOW)·$(RESET) searxng wasn't running\n"
+searxng-down:        ## stop SearXNG (named volume preserved)
+	@$(ENGINE) rm -f searxng searxng-redis >/dev/null 2>&1; \
+		$(ENGINE) network rm searxng >/dev/null 2>&1; \
+		printf "$(GREEN)✓$(RESET) searxng stopped\n"
 
 searxng-logs:        ## tail searxng container logs
-	@$(ENGINE) compose -f $(SEARXNG_COMPOSE) logs -f searxng
+	@$(ENGINE) logs -f searxng
 
 searxng-status:      ## show searxng status
 	@if $(ENGINE) ps --format '{{.Names}}' | grep -qx searxng; then \

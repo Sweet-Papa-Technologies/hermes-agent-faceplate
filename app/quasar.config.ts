@@ -201,14 +201,22 @@ export default defineConfig((ctx) => {
         mac: {
           category: 'public.app-category.productivity'
         },
-        // Bundle the sidecar compose files (and example config) into
-        // resources/sidecar/ so the app can `docker compose up -d` without
-        // requiring the user to clone the repo.
+        // Bundle the full sidecar build context into resources/sidecar/
+        // so the app can pull (or, offline, BUILD from Dockerfile.<variant>)
+        // the sidecar image without the user cloning the repo. M4 retired
+        // the compose files; sidecar.ts now runs a plain container.
         extraResources: [
           {
             from: '../sidecar',
             to: 'sidecar',
-            filter: ['compose.*.yml', 'config.example.yaml']
+            filter: [
+              'Dockerfile.*',
+              'entrypoint.sh',
+              'pyproject.toml',
+              'config.example.yaml',
+              'faceplate_sidecar/**',
+              'wakewords/**'
+            ]
           },
           // Bundle the Hermes `faceplate` plugin so the Hermes Pings settings
           // page can install it into ~/.hermes/plugins/ with one click.
