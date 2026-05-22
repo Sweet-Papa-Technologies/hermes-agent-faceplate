@@ -31,6 +31,8 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
+import { getSettings, applyPatch } from './settings-store';
+
 export interface EngineRun {
   code: number;
   stdout: string;
@@ -43,17 +45,89 @@ export interface RunOpts {
   timeoutMs?: number;
   /** Extra env vars, merged over `process.env` for the child process. */
   env?: Record<string, string>;
+  /** Live output sink. Receives raw stdout+stderr chunks as they arrive
+   *  (in addition to the buffered EngineRun). Used to surface real
+   *  `podman pull`/`build`/`machine init` progress. Callers are
+   *  responsible for throttling before forwarding to the renderer. */
+  onOutput?: (chunk: string) => void;
 }
 
-/** Resolve the container engine binary.
+/** Resolve the container engine binary. Sync + cheap (hot path).
  *
- *  M1: defaults to `docker` so behavior is unchanged for every existing
- *  user. Override with `FACEPLATE_CONTAINER_ENGINE=podman` for the spike
- *  and tests. M2 replaces this with podman-first auto-detection plus a
- *  persisted Settings value; M5 flips the default. */
+ *  Precedence: FACEPLATE_CONTAINER_ENGINE env override → persisted
+ *  `infra.container_engine` setting (when pinned to docker/podman) →
+ *  `docker` as the safe sync fallback while the setting is still 'auto'.
+ *
+ *  The M5 "default flips to Podman" happens via `resolveAndPersistEngine()`
+ *  at startup: it turns 'auto' into a pinned 'podman'/'docker' value that
+ *  this function then returns. The docker fallback here only applies in the
+ *  brief pre-resolution window, so an existing Docker user is never broken.
+ */
 export function containerEngine(): string {
   const override = process.env.FACEPLATE_CONTAINER_ENGINE?.trim();
-  return override && override.length > 0 ? override : 'docker';
+  if (override && override.length > 0) return override;
+  // Local require avoids a load-order issue: container-runtime is imported
+  // very early; settings-store is safe to read lazily here.
+  const sel = getSettings().infra.container_engine;
+  if (sel === 'docker' || sel === 'podman') return sel;
+  return 'docker';
+}
+
+/** Startup engine resolution (M5). When the setting is 'auto', pick an
+ *  engine and persist it so `containerEngine()` is stable thereafter:
+ *
+ *   - Podman installed AND no Docker-managed Hermes currently running →
+ *     'podman' (the recommended default).
+ *   - Otherwise, if Docker is available → 'docker' (never yank a running
+ *     Docker setup; Decision #1 — existing users are offered, not forced).
+ *   - Neither available → leave 'auto' (UI guides a Podman install;
+ *     `containerEngine()` keeps returning the docker fallback).
+ *
+ *  No-op when the env override is set or the user has pinned an engine. */
+export async function resolveAndPersistEngine(): Promise<void> {
+  if (process.env.FACEPLATE_CONTAINER_ENGINE?.trim()) return;
+  const sel = getSettings().infra.container_engine;
+  if (sel === 'docker' || sel === 'podman') return;
+
+  const podmanOk = await binaryWorks('podman');
+  if (podmanOk) {
+    const dockerHermesRunning = await dockerManagedHermesRunning();
+    if (!dockerHermesRunning) {
+      applyPatch({ infra: { container_engine: 'podman' } });
+      return;
+    }
+    applyPatch({ infra: { container_engine: 'docker' } });
+    return;
+  }
+  if (await binaryWorks('docker')) {
+    applyPatch({ infra: { container_engine: 'docker' } });
+  }
+  // else: leave 'auto' — nothing installed yet.
+}
+
+async function binaryWorks(bin: string): Promise<boolean> {
+  try {
+    const r = await runTool(bin, ['--version'], { timeoutMs: 5_000 });
+    return r.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Is a Docker-managed Hermes container currently running? Used only by
+ *  the startup resolver to avoid migrating a user off a working Docker
+ *  setup behind their back. */
+async function dockerManagedHermesRunning(): Promise<boolean> {
+  try {
+    const r = await runTool(
+      'docker',
+      ['ps', '--filter', 'name=hermes-personal', '--format', '{{.Names}}'],
+      { timeoutMs: 8_000 },
+    );
+    return r.code === 0 && r.stdout.split(/\r?\n/).some((l) => l.trim() === 'hermes-personal');
+  } catch {
+    return false;
+  }
 }
 
 function spawnEngine(
@@ -87,11 +161,23 @@ function spawnEngine(
             reject(new Error(`${binary} ${args[0]} timed out after ${opts.timeoutMs}ms`));
           }, opts.timeoutMs)
         : null;
+    const emit = (s: string): void => {
+      if (!opts.onOutput) return;
+      try {
+        opts.onOutput(s);
+      } catch {
+        /* a throwing sink must never break the run */
+      }
+    };
     proc.stdout.on('data', (b: Buffer) => {
-      stdout += b.toString('utf8');
+      const s = b.toString('utf8');
+      stdout += s;
+      emit(s);
     });
     proc.stderr.on('data', (b: Buffer) => {
-      stderr += b.toString('utf8');
+      const s = b.toString('utf8');
+      stderr += s;
+      emit(s);
     });
     proc.on('error', (err) => {
       if (settled) return;
@@ -179,27 +265,34 @@ function podmanRegistryEnv(): Record<string, string> {
   return memoPodmanAuthEnv;
 }
 
-let runtimeReady = false;
+let runtimeReadyAt = 0;
 
 /** The gate every container lifecycle call funnels through.
  *
  *  - engine !== podman (docker / M1 default): **no-op** — guarantees
  *    zero behavior change for existing Docker users.
  *  - Linux + podman: no-op (rootless Podman is native, no VM).
- *  - macOS/Windows + podman: ensure the `podman machine` VM exists and is
- *    running (delegated to podman-machine.ts; dynamic import avoids a
- *    static import cycle). Cached after the first success so status polls
- *    don't re-shell every time. */
-export async function ensureRuntime(): Promise<void> {
+ *  - macOS/Windows + podman: ensure the `podman machine` VM exists, is
+ *    running, AND is actually reachable (delegated to podman-machine.ts).
+ *
+ *  Caching is a short TTL, not a permanent flag: a permanent flag let a
+ *  VM that died after first success (laptop sleep) stay invisible, so the
+ *  next `podman run` failed with "ssh: handshake failed: EOF". The TTL
+ *  bounds that staleness — within ~15 s a dead VM is re-detected and
+ *  `ensureMachine` self-heals it. */
+const RUNTIME_READY_TTL_MS = 15_000;
+
+export async function ensureRuntime(onOutput?: (chunk: string) => void): Promise<void> {
   if (containerEngine() !== 'podman') return;
   if (process.platform !== 'darwin' && process.platform !== 'win32') return;
-  if (runtimeReady) return;
+  if (Date.now() - runtimeReadyAt < RUNTIME_READY_TTL_MS) return;
   const { ensureMachine } = await import('./podman-machine');
-  await ensureMachine();
-  runtimeReady = true;
+  await ensureMachine(onOutput);
+  runtimeReadyAt = Date.now();
 }
 
-/** Drop the cached "machine is up" flag (e.g. after an explicit stop). */
+/** Drop the cached "machine is up" timestamp (e.g. after an explicit
+ *  stop) so the next `ensureRuntime()` re-verifies immediately. */
 export function invalidateRuntimeReady(): void {
-  runtimeReady = false;
+  runtimeReadyAt = 0;
 }

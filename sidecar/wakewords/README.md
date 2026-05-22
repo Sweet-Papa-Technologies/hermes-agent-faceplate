@@ -10,10 +10,13 @@ bake a single trained word into the binary.
 ## Bringing your own
 
 1. Train a model with [openWakeWord's Piper-synthetic pipeline](https://github.com/dscripka/openWakeWord#training-new-models-with-synthetic-data) (~30 minutes on a CPU).
-2. Drop the resulting `.onnx` into the `faceplate-wakewords` Docker volume:
+2. Drop the resulting `.onnx` into the `faceplate-wakewords` named volume
+   (use whichever engine you run — `podman` or `docker`):
    ```
-   docker run --rm -v faceplate-wakewords:/wakewords -v $PWD:/host alpine \
+   podman run --rm -v faceplate-wakewords:/wakewords -v $PWD:/host alpine \
        cp /host/hey_hermes.onnx /wakewords/
+   # or: docker run --rm -v faceplate-wakewords:/wakewords -v $PWD:/host alpine \
+   #         cp /host/hey_hermes.onnx /wakewords/
    ```
 3. Add it to your `config.yaml`:
    ```yaml
@@ -23,7 +26,7 @@ bake a single trained word into the binary.
        - "/wakewords/hey_hermes.onnx"
      threshold: 0.5
    ```
-4. Restart the sidecar (`docker compose restart`).
+4. Restart the sidecar (`make down && make up` — compose is gone).
 
 ## Pre-trained alternatives
 

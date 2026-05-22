@@ -24,6 +24,8 @@ const INIT_MEMORY_MB = 4096;
 const INIT_TIMEOUT_MS = 600_000;
 const START_TIMEOUT_MS = 180_000;
 const QUERY_TIMEOUT_MS = 15_000;
+const REACHABLE_TIMEOUT_MS = 12_000;
+const RECOVER_STOP_TIMEOUT_MS = 60_000;
 
 function isVmPlatform(): boolean {
   return process.platform === 'darwin' || process.platform === 'win32';
@@ -74,7 +76,9 @@ export async function machineState(): Promise<PodmanMachineState> {
 
 /** Ensure the machine exists and is running. Idempotent.
  *  Linux → no-op. Throws with an actionable message on failure. */
-export async function ensureMachine(): Promise<PodmanMachineState> {
+export async function ensureMachine(
+  onOutput?: (chunk: string) => void,
+): Promise<PodmanMachineState> {
   if (!isVmPlatform()) {
     return { applicable: false, exists: true, running: true, name: '' };
   }
@@ -92,7 +96,7 @@ export async function ensureMachine(): Promise<PodmanMachineState> {
         '--memory',
         String(INIT_MEMORY_MB),
       ],
-      { timeoutMs: INIT_TIMEOUT_MS },
+      { timeoutMs: INIT_TIMEOUT_MS, ...(onOutput ? { onOutput } : {}) },
     );
     if (init.code !== 0) {
       throw new Error(
@@ -105,20 +109,61 @@ export async function ensureMachine(): Promise<PodmanMachineState> {
   if (!state.running) {
     const start = await runTool('podman', ['machine', 'start'], {
       timeoutMs: START_TIMEOUT_MS,
+      ...(onOutput ? { onOutput } : {}),
     });
     if (start.code !== 0) {
       const blob = `${start.stderr}\n${start.stdout}`.toLowerCase();
-      if (blob.includes('already running')) {
-        return machineState();
+      if (!blob.includes('already running')) {
+        throw new Error(
+          `podman machine start failed (exit ${start.code}).\n\n${(start.stderr || start.stdout).trim().slice(-300)}`,
+        );
       }
+      // "already running" — fall through to the reachability check below,
+      // since that state can itself be the wedged-VM lie.
+    }
+    state = await machineState();
+  }
+
+  // `machine list` only reads local state — it can report Running while the
+  // VM's SSH/socket is dead (classic after the Mac sleeps). Verify with a
+  // real call and recover a wedged VM; otherwise the next `podman run`
+  // fails with the cryptic "ssh: handshake failed: EOF".
+  if (state.running && !(await machineReachable())) {
+    await runTool('podman', ['machine', 'stop'], {
+      timeoutMs: RECOVER_STOP_TIMEOUT_MS,
+    }).catch(() => undefined);
+    const restart = await runTool('podman', ['machine', 'start'], {
+      timeoutMs: START_TIMEOUT_MS,
+      ...(onOutput ? { onOutput } : {}),
+    }).catch(() => null);
+    if (!(await machineReachable())) {
       throw new Error(
-        `podman machine start failed (exit ${start.code}).\n\n${(start.stderr || start.stdout).trim().slice(-300)}`,
+        'The Podman machine VM is wedged — it reports "running" but its ' +
+          'connection is dead (common after the Mac sleeps). Auto-recovery ' +
+          '(stop + start) did not fix it. In a terminal, run:\n\n' +
+          '  podman machine stop && podman machine start\n\n' +
+          'If `podman machine stop` hangs, clear the stale VM processes ' +
+          'first: `pkill -f vfkit; pkill -f gvproxy`, then ' +
+          '`podman machine start`.' +
+          (restart ? `\n\n${(restart.stderr || restart.stdout).trim().slice(-200)}` : ''),
       );
     }
     state = await machineState();
   }
 
   return state;
+}
+
+/** A real connection test. `podman machine list` reads only host-side
+ *  state; `podman ps` must actually reach the VM — exit 0 ⇒ connected,
+ *  non-zero ⇒ dead socket/SSH. */
+async function machineReachable(): Promise<boolean> {
+  try {
+    const r = await runTool('podman', ['ps', '-q'], { timeoutMs: REACHABLE_TIMEOUT_MS });
+    return r.code === 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Stop the VM (used by an explicit Settings action). Linux → no-op. */

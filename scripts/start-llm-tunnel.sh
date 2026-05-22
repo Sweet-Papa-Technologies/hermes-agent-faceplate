@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Tunnel a LAN LLM (e.g. LM Studio at 192.168.1.99:8080) into the Docker
-# container that runs hermes-agent.
+# Tunnel a LAN LLM (e.g. LM Studio at 192.168.1.99:8080) into the
+# container that runs hermes-agent (Docker or Podman).
 #
-# Why: Docker Desktop on macOS bridges the container off a private subnet
-# whose default route doesn't include arbitrary LAN IPs. From inside the
-# container, `192.168.1.99:8080` times out even though the host can reach
-# it instantly. The container CAN reach the host via `host.docker.internal`,
-# so we run socat ON THE HOST as a TCP proxy: container ─► host.docker.internal:18080
-# ─► macOS network stack ─► 192.168.1.99:8080.
+# Why: on macOS the container runs in a VM (Docker Desktop, or the Podman
+# machine) off a private subnet whose default route doesn't include
+# arbitrary LAN IPs. From inside the container, `192.168.1.99:8080` times
+# out even though the host can reach it instantly. The container CAN reach
+# the host via `host.docker.internal` (Podman 5.x aliases this natively),
+# so we run socat ON THE HOST as a TCP proxy: container ─►
+# host.docker.internal:18080 ─► macOS network stack ─► 192.168.1.99:8080.
 #
 # Idempotent. Re-runnable. Edits ~/.hermes/config.yaml the first time
 # (with a timestamped backup) so hermes points at the tunnel.
@@ -25,9 +26,9 @@ PID_FILE="$HOME_DIR/llm-tunnel.pid"
 LOG_FILE="$HOME_DIR/llm-tunnel.log"
 HERMES_CONFIG="$HOME/.hermes/config.yaml"
 
-# Container engine. M1 default = docker (zero behavior change). Override
-# with CONTAINER_ENGINE=podman. Podman migration M5 flips this default.
-CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
+# Container engine (M5 default): Podman if installed, else Docker.
+# Override explicitly with CONTAINER_ENGINE=docker|podman.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)}"
 
 if [ -t 1 ]; then
   GREEN=$'\033[1;32m'; YELLOW=$'\033[1;33m'; RED=$'\033[1;31m'; RESET=$'\033[0m'

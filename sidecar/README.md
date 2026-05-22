@@ -15,13 +15,18 @@ on `127.0.0.1:8080`.
 ## Quick start
 
 ```bash
-docker compose -f compose.cpu.yml up -d
+make up   # from the repo root — runs the sidecar as a plain container
 curl -fsS http://127.0.0.1:8080/health | jq .
 ```
 
-The first run downloads model weights into named Docker volumes
-(`faceplate-models`, `faceplate-voices`, `faceplate-wakewords`); subsequent
-runs cache hit.
+`make up` is engine-agnostic (Podman by default, Docker supported); to run
+the script directly: `CONTAINER_ENGINE=podman bash scripts/start-sidecar.sh`.
+There is no compose anymore — the sidecar is a plain `run`, pull-first with a
+`Dockerfile.<variant>` build fallback.
+
+The first run downloads model weights into named container volumes — Podman
+or Docker — (`faceplate-models`, `faceplate-voices`, `faceplate-wakewords`);
+subsequent runs cache hit.
 
 ## Endpoints
 
@@ -63,7 +68,7 @@ entrypoint and read at config-load time. The chat-completions route 501s
 when `cpu-slim`, and `/health` reports the build verbatim so the Faceplate
 can show it in the Privacy panel.
 
-## Local development (without Docker)
+## Local development (without a container engine — no Podman / Docker)
 
 ```bash
 pip install -e ".[dev]"

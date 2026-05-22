@@ -285,8 +285,24 @@ export const WizardState = z.object({
 });
 export type WizardState = z.infer<typeof WizardState>;
 
+export const InfraSettings = z.object({
+  /**
+   * Container engine for the Hermes Agent + sidecar containers.
+   *  - 'auto'   : resolve at startup — Podman if installed (recommended),
+   *               else an available Docker, without yanking a running
+   *               Docker-managed Hermes. Once resolved it's persisted as
+   *               'podman' or 'docker'; pick 'auto' again to re-resolve.
+   *  - 'podman' : always Podman (the app can install/manage it).
+   *  - 'docker' : always Docker (for users who already use it).
+   * Overridden by the FACEPLATE_CONTAINER_ENGINE env var when set.
+   */
+  container_engine: z.enum(['auto', 'docker', 'podman']).default('auto'),
+});
+export type InfraSettings = z.infer<typeof InfraSettings>;
+
 export const FaceplateSettings = z.object({
   schema_version: z.literal(1).default(1),
+  infra: InfraSettings.default({}),
   hermes: HermesSettings.default({}),
   paraphrase: ParaphraseSettings.default({}),
   speech: SpeechSettings.default({}),

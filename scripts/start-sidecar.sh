@@ -13,7 +13,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SIDECAR_DIR="$HERE/sidecar"
 
-CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
+# Engine (M5 default): Podman if installed, else Docker. Override with
+# CONTAINER_ENGINE=docker|podman.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)}"
 SIDECAR_VARIANT="${SIDECAR_VARIANT:-cpu}"
 FACEPLATE_API_KEY="${FACEPLATE_API_KEY:-}"
 

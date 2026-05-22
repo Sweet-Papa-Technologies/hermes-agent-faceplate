@@ -18,9 +18,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SETTINGS="$HERE/searxng/settings.yml"
 
-# Container engine. M1 default = docker (zero behavior change). Override
-# with CONTAINER_ENGINE=podman. Podman migration M5 flips this default.
-CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
+# Container engine (M5 default): Podman if installed, else Docker.
+# Override explicitly with CONTAINER_ENGINE=docker|podman.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)}"
 
 # M4: converted off `compose` to plain `run` (Decision #5 — no dependency
 # on podman-compose). Faithful translation of the retired

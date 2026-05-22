@@ -22,9 +22,9 @@ HERMES_URL      ?= http://127.0.0.1:8642
 HERMES_KEY      ?=
 SIDECAR_URL     ?= http://127.0.0.1:8080
 
-# Container engine. M1 default = docker (zero behavior change). Override
-# with `make ENGINE=podman …`. Podman migration M5 flips this default.
-ENGINE          ?= docker
+# Container engine (M5 default): Podman if installed, else Docker.
+# Override with `make ENGINE=docker …` (or ENGINE=podman).
+ENGINE          ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 
 GREEN  := \033[1;32m
 YELLOW := \033[1;33m

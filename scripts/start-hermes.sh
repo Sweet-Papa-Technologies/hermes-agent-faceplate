@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Start hermes-agent in Docker with the env vars + port mapping the
-# Faceplate needs. Idempotent: re-runnable safely.
+# Start hermes-agent in a container (Podman by default, or Docker via
+# CONTAINER_ENGINE=docker) with the env vars + port mapping the Faceplate
+# needs. Idempotent: re-runnable safely. The app's canonical path is
+# app/src-electron/hermes-lifecycle.ts; this script is the CLI/Make twin.
 #
 #   - Creates ~/.hermes/.env if missing.
 #   - Adds API_SERVER_ENABLED / HOST / PORT / KEY only if absent (preserves
@@ -26,9 +28,9 @@
 
 set -euo pipefail
 
-# Container engine. M1 default = docker (zero behavior change). Override
-# with CONTAINER_ENGINE=podman. podman's CLI is drop-in for these verbs.
-CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
+# Container engine (M5 default): Podman if installed, else Docker.
+# Override explicitly with CONTAINER_ENGINE=docker|podman.
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)}"
 
 # Two image identifiers:
 #   - BASE: what we pull from the registry (upstream)

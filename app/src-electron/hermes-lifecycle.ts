@@ -32,7 +32,12 @@ import {
   type EngineRun,
 } from './container-runtime';
 import { ensureHermesApiEnv, readEnvFile, hermesHome } from './hermes-env';
-import { IPC, type HermesAgentStatus, type HermesAgentInstallResult } from './preload-api';
+import {
+  IPC,
+  type HermesAgentStatus,
+  type HermesAgentInstallResult,
+  type HermesInstallProgress,
+} from './preload-api';
 
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -47,7 +52,11 @@ const READY_TIMEOUT_MS = 120_000; // gateway boot is slower than kokoro
 const POLL_INTERVAL_MS = 1_500;
 const PULL_TIMEOUT_MS = 900_000; // base image is ~5.5 GB (M0)
 const BUILD_TIMEOUT_MS = 600_000;
-const RUN_TIMEOUT_MS = 60_000;
+// `podman run -d` returns once the container is created — but on macOS the
+// Podman VM + `--userns=keep-id` re-maps the bind-mounted ~/.hermes to the
+// container user, which on a large data dir is O(files) and can take
+// minutes on first run. 60 s was far too tight (the reported timeout bug).
+const RUN_TIMEOUT_MS = 600_000;
 const RM_TIMEOUT_MS = 30_000;
 const INSPECT_TIMEOUT_MS = 8_000;
 
@@ -131,11 +140,13 @@ async function reachable(): Promise<boolean> {
   }
 }
 
-async function pollReady(): Promise<boolean> {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
+async function pollReady(onTick?: (elapsedSec: number) => void): Promise<boolean> {
+  const start = Date.now();
+  const deadline = start + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (await reachable()) return true;
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    onTick?.(Math.round((Date.now() - start) / 1000));
   }
   return false;
 }
@@ -187,15 +198,72 @@ function runArgs(image: string): string[] {
   return args;
 }
 
-export async function installHermesAgent(): Promise<HermesAgentInstallResult> {
+export async function installHermesAgent(
+  onProgress?: (p: HermesInstallProgress) => void,
+): Promise<HermesAgentInstallResult> {
   const steps: string[] = [];
+  const send = (p: HermesInstallProgress): void => {
+    try {
+      onProgress?.(p);
+    } catch {
+      /* a dead renderer must not break the install */
+    }
+  };
+  // Milestone — recorded in the result AND appended to the renderer list.
+  const report = (message: string): void => {
+    steps.push(message);
+    send({ kind: 'step', message });
+  };
+  // Transient sub-progress — only updates the single "current step" label
+  // in the UI (never appended), so streaming thousands of pull/build lines
+  // can't bloat the list or thrash layout.
+  const reportStatus = (message: string): void => {
+    send({ kind: 'status', message });
+  };
+  // Turn a child's raw stdout/stderr into a throttled, single-line status.
+  // podman pull/build/machine-init redraw with '\r' and emit many chunks
+  // very fast; we take the latest non-empty segment, cap its length, and
+  // forward at most ~3×/sec so the IPC + renderer stay smooth.
+  const makeOutputSink = (): ((chunk: string) => void) => {
+    let last = 0;
+    let pending: string | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = (): void => {
+      timer = null;
+      if (pending === null) return;
+      last = Date.now();
+      const msg = pending;
+      pending = null;
+      reportStatus(msg);
+    };
+    return (chunk: string): void => {
+      const seg = chunk
+        .split(/[\r\n]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .pop();
+      if (!seg) return;
+      pending = seg.length > 180 ? `${seg.slice(0, 179)}…` : seg;
+      const since = Date.now() - last;
+      if (since >= 350) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        flush();
+      } else if (!timer) {
+        timer = setTimeout(flush, 350 - since);
+      }
+    };
+  };
   try {
-    await ensureRuntime();
-    steps.push(`Container engine: ${containerEngine()}`);
+    report('Checking container engine…');
+    await ensureRuntime(makeOutputSink());
+    report(`Container engine: ${containerEngine()}`);
 
     const pre = await getHermesAgentStatus();
     if (pre.reachable) {
-      steps.push('Hermes already reachable at /v1/health — nothing to do.');
+      report('Hermes already reachable at /v1/health — nothing to do.');
       return { ok: true, steps, status: pre };
     }
     if (!pre.engine_available) {
@@ -209,16 +277,22 @@ export async function installHermesAgent(): Promise<HermesAgentInstallResult> {
     }
 
     const apiEnv = ensureHermesApiEnv(API_PORT);
-    steps.push('Ensured API_SERVER_* in ~/.hermes/.env (existing values preserved).');
+    report('Ensured API_SERVER_* in ~/.hermes/.env (existing values preserved).');
 
     // Base image
     const haveBase = await runEngine(['image', 'inspect', BASE_IMAGE], {
       timeoutMs: INSPECT_TIMEOUT_MS,
     }).then((r) => r.code === 0).catch(() => false);
     if (!haveBase) {
-      steps.push(`Pulling ${BASE_IMAGE} (~5.5 GB, one-time)…`);
-      const pull = await runEngine(['pull', BASE_IMAGE], { timeoutMs: PULL_TIMEOUT_MS });
+      report(`Pulling ${BASE_IMAGE} (~5.5 GB — this can take several minutes)…`);
+      const pull = await runEngine(['pull', BASE_IMAGE], {
+        timeoutMs: PULL_TIMEOUT_MS,
+        onOutput: makeOutputSink(),
+      });
       if (pull.code !== 0) throw new Error(diagnose('pull', pull));
+      report('Base image pulled.');
+    } else {
+      report('Base image already present.');
     }
 
     // Browser-augmented image
@@ -226,35 +300,44 @@ export async function installHermesAgent(): Promise<HermesAgentInstallResult> {
     const dfDir = dockerfileDir();
     if (!dfDir) {
       runImage = BASE_IMAGE;
-      steps.push('No bundled Dockerfile found — running base image (browser tools disabled).');
+      report('No bundled Dockerfile found — running base image (browser tools disabled).');
     } else {
-      steps.push(`Building ${LOCAL_TAG} (chromium + agent-browser)…`);
+      report(`Building ${LOCAL_TAG} (chromium + agent-browser; cached after first run)…`);
       const build = await runEngine(
         ['build', '--build-arg', `HERMES_BASE=${BASE_IMAGE}`, '-t', LOCAL_TAG, dfDir],
-        { timeoutMs: BUILD_TIMEOUT_MS },
+        { timeoutMs: BUILD_TIMEOUT_MS, onOutput: makeOutputSink() },
       );
       if (build.code !== 0) throw new Error(diagnose('build', build));
+      report('Browser image ready.');
     }
 
     // Recreate (matches start-hermes.sh: rm -f then run, so env/config
     // changes are picked up). ~/.hermes is a bind mount → data preserved.
     if ((await containerState()) !== 'missing') {
       await runEngine(['rm', '-f', CONTAINER_NAME], { timeoutMs: RM_TIMEOUT_MS });
-      steps.push(`Removed existing "${CONTAINER_NAME}" (data volume preserved).`);
+      report(`Removed existing "${CONTAINER_NAME}" (data volume preserved).`);
     }
+    report(
+      'Creating container… (first run re-maps the ~/.hermes volume to the ' +
+        'container user — on a large data dir this can take a few minutes)',
+    );
     const run = await runEngine(runArgs(runImage), { timeoutMs: RUN_TIMEOUT_MS });
     if (run.code !== 0) throw new Error(diagnose('run', run));
-    steps.push(`Started "${CONTAINER_NAME}" on ${BIND}:${API_PORT}.`);
+    report(`Started "${CONTAINER_NAME}" on ${BIND}:${API_PORT}.`);
 
-    steps.push(`Waiting for /v1/health (up to ${READY_TIMEOUT_MS / 1000}s)…`);
-    if (!(await pollReady())) {
+    report(`Waiting for /v1/health (up to ${READY_TIMEOUT_MS / 1000}s)…`);
+    if (
+      !(await pollReady((sec) =>
+        reportStatus(`Waiting for Hermes gateway to answer… ${sec}s`),
+      ))
+    ) {
       throw new Error(
         `Container started but /v1/health didn't answer in ${READY_TIMEOUT_MS / 1000}s. Check \`${containerEngine()} logs ${CONTAINER_NAME}\`.`,
       );
     }
-    steps.push('Hermes Agent is up.');
+    report('Hermes Agent is up.');
     // Surface the key so the wizard/Connection panel can use it.
-    steps.push(`API key is in ~/.hermes/.env (API_SERVER_KEY, ${apiEnv.key.slice(0, 6)}…).`);
+    report(`API key is in ~/.hermes/.env (API_SERVER_KEY, ${apiEnv.key.slice(0, 6)}…).`);
 
     return { ok: true, steps, status: await getHermesAgentStatus() };
   } catch (err) {
@@ -279,6 +362,13 @@ export async function stopHermesAgent(): Promise<HermesAgentStatus> {
 
 export function registerHermesLifecycleIpc(): void {
   ipcMain.handle(IPC.hermes.agentStatus, () => getHermesAgentStatus());
-  ipcMain.handle(IPC.hermes.agentInstall, () => installHermesAgent());
+  ipcMain.handle(IPC.hermes.agentInstall, (event) =>
+    // Stream progress back to the window that started the install.
+    installHermesAgent((p) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IPC.hermes.agentInstallProgress, p);
+      }
+    }),
+  );
   ipcMain.handle(IPC.hermes.agentStop, () => stopHermesAgent());
 }

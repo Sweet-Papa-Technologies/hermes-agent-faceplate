@@ -16,7 +16,13 @@
 
 import { ipcMain, net } from 'electron';
 
-import { runEngine, engineAvailable, ensureRuntime, type EngineRun } from './container-runtime';
+import {
+  runEngine,
+  engineAvailable,
+  ensureRuntime,
+  containerEngine,
+  type EngineRun,
+} from './container-runtime';
 import { IPC, type KokoroStatus } from './preload-api';
 import { getSettings } from './settings-store';
 
@@ -178,13 +184,13 @@ export async function ensureKokoroRunning(): Promise<KokoroStatus> {
       { timeoutMs: 300_000 },
     );
     if (run.code !== 0) {
-      throw new Error(diagnoseDockerError('docker run', run));
+      throw new Error(diagnoseDockerError(`${containerEngine()} run`, run));
     }
   } else {
     console.log(`[kokoro] starting existing container ${CONTAINER_NAME}`);
     const start = await runEngine(['start', CONTAINER_NAME], { timeoutMs: 30_000 });
     if (start.code !== 0) {
-      throw new Error(diagnoseDockerError('docker start', start));
+      throw new Error(diagnoseDockerError(`${containerEngine()} start`, start));
     }
   }
 

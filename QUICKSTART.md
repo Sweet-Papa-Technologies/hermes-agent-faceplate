@@ -2,18 +2,18 @@
 
 The fastest path from a fresh clone to a working avatar that listens, thinks, and speaks. For deployment variants, customisation, or troubleshooting, read [`SETUP.md`](./SETUP.md) instead.
 
-> **v1 shipping note.** Configuration is settings-only — once installed, the app needs nothing beyond your Hermes URL + API key entered in the wizard. No `~/.hermes/config.yaml` edits required. **Runtime** in v1 still wants Docker for the speech sidecar (TTS / ASR / wake-word); a no-Docker path managed by `uv` is on the v1.1 roadmap. See `docs/v1/v1.todo.md` for the deferred items.
+> **v1 shipping note.** Configuration is settings-only — once installed, the app needs nothing beyond your Hermes URL + API key entered in the wizard. No `~/.hermes/config.yaml` edits required. **Runtime** uses a container engine for the speech sidecar (TTS / ASR / wake-word): **Podman by default** (app-managed, including a one-click install and the macOS / Windows podman machine), with Docker still fully supported. See `docs/v1/v1.todo.md` for the deferred items.
 
 ## Prereqs
 
 | Tool | Why | Install |
 |---|---|---|
 | **GNU Make** ≥ 3.81 | Drives the convenience targets below | macOS: `xcode-select --install`. Linux: usually preinstalled (`apt install make` / `dnf install make`). Windows: WSL2 (recommended) or `choco install make` |
-| **Docker** with Compose v2 | Runs hermes-agent + the Faceplate speech sidecar | [Docker Desktop](https://www.docker.com/products/docker-desktop/) on macOS / Windows; engine + compose plugin on Linux |
+| **Podman** (default) or **Docker** — no compose plugin | Runs hermes-agent + the Faceplate speech sidecar | Podman (rootless, daemonless, free): `brew install podman` / `winget install RedHat.Podman` / `apt install podman`, or one-click from **Settings → Container Engine** (which also manages the macOS / Windows podman machine). Docker still works: [Docker Desktop](https://www.docker.com/products/docker-desktop/) on macOS / Windows, engine on Linux |
 | **Node.js** ≥ 22.12 | Electron runtime | [nodejs.org](https://nodejs.org) or `nvm install 22` |
 | **pnpm** ≥ 10 | Package manager | `npm install -g pnpm` |
 
-Run `make check-prereqs` to confirm Docker, pnpm, and Node are wired up.
+Run `make check-prereqs` to confirm a container engine (Podman or Docker), pnpm, and Node are wired up — it no longer checks for a compose plugin.
 
 > **Python is no longer required.** The earlier Quickstart asked for `python3` + `pipx` for a host-native LiteRT-LM paraphrase server. v1 hides that option (the bundled Gemma-4-E2B was too small to follow the summarize prompt reliably) and routes paraphrase through your Hermes LLM directly via a memory-safe bypass. Code is still there for power-users; UI is gone.
 
@@ -22,15 +22,15 @@ Run `make check-prereqs` to confirm Docker, pnpm, and Node are wired up.
 The Faceplate is a thin Electron client that talks to **two** services (one was three before — paraphrase no longer needs its own server):
 
 ```
-   ┌──────────────┐    ─8642─►  hermes-agent (Docker, native, or remote)
+   ┌──────────────┐    ─8642─►  hermes-agent (Podman/Docker, or remote)
    │              │             full agent loop, memory, tools, skills.
    │  Faceplate   │             Paraphrase reuses this LLM directly.
    │  (Electron)  │
-   │              │    ─8080─►  faceplate-sidecar (Docker)
+   │              │    ─8080─►  faceplate-sidecar (Podman or Docker)
    │              │             Piper TTS + Whisper ASR + wake-word
    └──────────────┘
                        (optional, if you want better voices:)
-                       ─8880─►  Kokoro-FastAPI (Docker)
+                       ─8880─►  Kokoro-FastAPI (Podman or Docker)
 
                        (optional, if you want Hermes-initiated pings:)
                        ─8643─►  hermes-plugin/faceplate (lives inside
@@ -58,7 +58,7 @@ Or all at once: **`make all`** runs steps 1–3 in sequence, then `make app` sep
 |---|---|---|
 | **1. `make hermes-up`** | Pulls `nousresearch/hermes-agent`, generates an `API_SERVER_KEY` if `~/.hermes/.env` doesn't have one, starts the container with `gateway run` and `-p 127.0.0.1:8642:8642`, polls `/v1/health` until ready, prints the key. Skip if you're already running Hermes elsewhere. | ~30 s on a fast connection |
 | **2. `make setup`** | Copies `sidecar/config.example.yaml` → `sidecar/config.yaml`, generates a separate `FACEPLATE_API_KEY` for the sidecar, runs `pnpm install` in `app/`. | ~30 s |
-| **3. `make up`** | Builds + starts the Faceplate sidecar Docker container. Default Piper voice (`en_US-amy-medium`) auto-downloads on first start. | ~2–3 min on first build, ~5 s after |
+| **3. `make up`** | Starts the Faceplate sidecar as a plain container (no compose). Pull-first, build-fallback: pulls `ghcr.io/nousresearch/hermes-faceplate-sidecar:<variant>`, builds from `Dockerfile.<variant>` only if the pull fails. Default Piper voice (`en_US-amy-medium`) auto-downloads on first start. | ~1–2 min on first pull, ~5 s after |
 | **4. `make app`** | `cd app && pnpm dev` — boots Vite + Electron. Avatar appears bottom-right; setup wizard opens. | A few seconds |
 
 The two keys (Hermes API + sidecar bearer) are printed to your terminal by steps 1 and 2 — copy them; the wizard / settings ask for them.
@@ -69,7 +69,7 @@ The two keys (Hermes API + sidecar bearer) are printed to your terminal by steps
 |---|---|
 | **Welcome** | Click "Get started" |
 | **Connect to hermes-agent** | Pick **"I have a Hermes gateway running"**. URL pre-fills with `http://127.0.0.1:8642/v1`. Paste the `API_SERVER_KEY` from `make hermes-up`. Click "Re-probe" — should turn green. |
-| **Speech engine** | Pick **Piper** (bundled, works out of the box) or **Kokoro** (better voices, separate sidecar — see below). Then **Bundled Docker** for the TTS/ASR/wake source, image variant **cpu-slim**. |
+| **Speech engine** | Pick **Piper** (bundled, works out of the box) or **Kokoro** (better voices, separate sidecar — see below). Then **Bundled (Podman / Docker)** for the TTS/ASR/wake source, image variant **cpu-slim**. |
 | **Test endpoints** | Click each. First TTS / ASR test triggers model downloads (~480 MB Whisper) so it takes a moment; subsequent calls are sub-second. |
 | **Voice** | Pick **Off** to start (PTT or wake-word are flippable later from Settings). |
 | **Display** | **Overlay** on macOS / Windows / Linux X11. **Windowed** on Wayland. |
@@ -88,10 +88,11 @@ After the wizard closes, **open Settings → Speech Sidecar → Bearer token** a
 
 ## Optional: Kokoro for higher-quality voices
 
-Piper is fast and ships in the bundled sidecar; Kokoro is a separate container with much better prosody (one-shot it via Docker):
+Piper is fast and ships in the bundled sidecar; Kokoro is a separate container with much better prosody (the app can manage it for you, or one-shot it yourself — works with `podman run` or `docker run`):
 
 ```bash
-docker run -d -p 8880:8880 --name kokoro ghcr.io/remsky/kokoro-fastapi-cpu:latest
+podman run -d -p 8880:8880 --name kokoro ghcr.io/remsky/kokoro-fastapi-cpu:latest
+# or: docker run -d -p 8880:8880 --name kokoro ghcr.io/remsky/kokoro-fastapi-cpu:latest
 ```
 
 Then in the app: **Settings → Speech Sidecar → Engine → Kokoro**. Default voice `af_bella` (other options listed in the dropdown). ~340 MB on disk, 17–22× realtime on Apple Silicon.
@@ -111,8 +112,8 @@ FACEPLATE_HOME_CHANNEL=default
 FACEPLATE_PORT=8643
 EOF
 
-# Restart Hermes to pick up the plugin
-docker restart hermes-personal
+# Restart Hermes to pick up the plugin (or just `make hermes-down && make hermes-up`)
+podman restart hermes-personal   # or: docker restart hermes-personal
 ```
 
 Then in the app: **Settings → Hermes Pings** → enable + paste the same `FACEPLATE_API_KEY`. Drop a cron job in `~/.hermes/cron/` with `deliver: faceplate` and you'll get an OS notification + a new turn in the dedicated **"Hermes pings"** conversation. Full reference: `hermes-plugin/README.md`.
@@ -121,13 +122,13 @@ Then in the app: **Settings → Hermes Pings** → enable + paste the same `FACE
 
 | Symptom | Quick fix |
 |---|---|
-| `make hermes-up` fails with "image not found" | Network issue — `docker pull nousresearch/hermes-agent` manually to see the actual error |
+| `make hermes-up` fails with "image not found" | Network issue — `podman pull nousresearch/hermes-agent` / `docker pull nousresearch/hermes-agent` manually to see the actual error |
 | Wizard says "Couldn't reach hermes" | `make verify` to see which side fails. Most often: API key mismatch — the wizard expects the value `make hermes-up` printed, not the placeholder. |
 | TTS test hangs the first time | Piper voice download in progress (~60 MB). `make logs` to watch. Subsequent calls are instant. |
 | TTS test 401s | Sidecar bearer token isn't pasted into Settings — see the last paragraph of "Walking the wizard" |
 | Mouth doesn't move on the first response | Click the avatar once. Chromium's autoplay policy blocks AudioContext until a user gesture. |
 | Global hotkeys don't fire on macOS | System Settings → Privacy & Security → Accessibility → enable HermesAgent Faceplate (or Electron in dev mode) |
-| Hermes Pings panel says "Disconnected" | `curl http://127.0.0.1:8643/health` to confirm the plugin is running. If 404, the plugin didn't load — check `docker logs hermes-personal` for `[faceplate]` lines. |
+| Hermes Pings panel says "Disconnected" | `curl http://127.0.0.1:8643/health` to confirm the plugin is running. If 404, the plugin didn't load — check `podman logs hermes-personal` / `docker logs hermes-personal` for `[faceplate]` lines. |
 | Chart / diagram fails to render | The auto-fix runs automatically on first error — wait a few seconds for the spinner. After two attempts the source is shown for manual inspection. |
 
 ## Tear-down
@@ -135,7 +136,7 @@ Then in the app: **Settings → Hermes Pings** → enable + paste the same `FACE
 ```bash
 make down              # stop the Faceplate sidecar
 make hermes-down       # stop the hermes-agent container
-docker stop kokoro     # if you started Kokoro above
+podman stop kokoro     # (or docker stop kokoro) if you started Kokoro above
 # To also drop sidecar volumes (model cache, voices, wakewords):
 make clean
 ```

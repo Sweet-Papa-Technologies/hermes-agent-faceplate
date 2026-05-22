@@ -1,6 +1,12 @@
 # HermesAgent Faceplate — Setup
 
-End-to-end setup against a hermes-agent running locally in Docker. The
+End-to-end setup against a hermes-agent running locally in a container. The
+container engine is **Podman by default** (Docker still fully supported); the
+app auto-resolves on launch — Podman if installed (recommended), else an
+available Docker, and it never disrupts an already-running Docker Hermes.
+Pick the engine in the app under **Settings → Container Engine** (Auto /
+Podman / Docker), or override everything with `FACEPLATE_CONTAINER_ENGINE=podman|docker`
+(`CONTAINER_ENGINE=…` for scripts, `make ENGINE=podman …` for Make). The
 Faceplate also works against remote / LAN / cloud hermes deployments — just
 swap `HERMES_URL` for the appropriate URL.
 
@@ -10,9 +16,9 @@ The Faceplate is a thin Electron client that talks to **three** local services:
 
 | Service | Where it runs | Port | What it does |
 |---|---|---|---|
-| `hermes-personal` | Docker | 8642 | Full agent loop (chat, memory, tools, skills) |
+| `hermes-personal` | Podman or Docker | 8642 | Full agent loop (chat, memory, tools, skills) |
 | `litert-lm serve` | **Host-native** (pip-installed) | 7860 | OpenAI-compatible LLM for the paraphrase pass. Native Metal on macOS, native CUDA on NVIDIA, CPU everywhere else. |
-| `faceplate-sidecar` | Docker | 8080 | TTS + ASR + wake-word only |
+| `faceplate-sidecar` | Podman or Docker | 8080 | TTS + ASR + wake-word only |
 
 LiteRT-LM lives outside the container deliberately — Google ships native
 binaries for macOS arm64 / Linux x86_64+arm64 / Windows x86_64, and running
@@ -24,20 +30,22 @@ contortions.
 | Tool | Version | Why | Install |
 |---|---|---|---|
 | **GNU Make** | ≥ 3.81 | Drives the convenience targets used below. Optional — every target has a manual equivalent at the bottom of this doc. | macOS: `xcode-select --install`. Linux: usually preinstalled; else `apt install make` / `dnf install make`. Windows: WSL2 (recommended) or `choco install make`. |
-| **Docker** | latest, w/ Compose v2 plugin | hermes-agent + Faceplate sidecar | Docker Desktop on macOS / Windows; engine + compose plugin on Linux. Sidecar builds native on every architecture (incl. arm64) — no Rosetta required. |
+| **Podman** (default) *or* **Docker** | latest — no compose plugin needed | hermes-agent + Faceplate sidecar | Podman is rootless, daemonless, free: macOS `brew install podman`, Windows `winget install RedHat.Podman`, Linux `apt install podman` / `dnf install podman` — or one-click from **Settings → Container Engine**. Docker still works (Docker Desktop on macOS / Windows; engine on Linux). On macOS / Windows, Podman runs a small Linux VM ("podman machine", ~1 GB, downloaded first run — the app manages it); on Linux Podman is native, no VM. The sidecar runs native on every architecture (incl. arm64) — no Rosetta required. |
 | **Python 3** + **pipx** | latest | Hosts `litert-lm` for the paraphrase LLM | macOS / Linux: `python3 -m pip install --user pipx && pipx ensurepath` (the `litert-up` script will install pipx for you if missing) |
 | **Node.js** | ≥ 22.12 | Electron runtime | nodejs.org or `nvm install 22` |
 | **pnpm** | ≥ 10 | Package manager | `npm install -g pnpm` |
 
-`make check-prereqs` from the repo root verifies the bottom three (the fact
-that `make` itself runs is sufficient evidence Make is installed).
+`make check-prereqs` from the repo root verifies the bottom three plus a
+usable container engine (the fact that `make` itself runs is sufficient
+evidence Make is installed). It no longer checks for a compose plugin —
+there is no compose dependency anymore.
 
 ---
 
 ## 1. Get hermes-agent reachable from the host
 
 By default hermes binds its API server to `127.0.0.1` *inside the container*,
-which the host can't reach through Docker port mapping. Two things to do.
+which the host can't reach through container port mapping. Two things to do.
 
 ### 1a. Set the API server vars in `~/.hermes/.env`
 
@@ -55,9 +63,13 @@ placeholder — don't ship that.)
 
 ### 1b. Run the container with port mapping (host loopback only)
 
+The easy path is **`make hermes-up`** (or **`make ENGINE=podman hermes-up`** /
+**`ENGINE=docker`**), which runs the script that does everything below. If you
+want to do it by hand, substitute `podman` or `docker` for `<engine>`:
+
 ```bash
-docker rm -f hermes-personal 2>/dev/null
-docker run -d --name hermes-personal \
+<engine> rm -f hermes-personal 2>/dev/null
+<engine> run -d --name hermes-personal \
   -p 127.0.0.1:8642:8642 \
   -v ~/.hermes:/opt/data \
   --restart unless-stopped \
@@ -68,7 +80,12 @@ The trailing **`gateway run`** is required — the image's default entrypoint
 is the interactive `hermes chat` REPL, which exits immediately when there's
 no TTY. `gateway run` launches the persistent API server.
 
-`make hermes-up` runs the script that does all of the above.
+`~/.hermes` is a host bind mount (not a container volume), so switching
+engines preserves all Hermes config / plugins / logs. (The app can also
+install and run Hermes for you from **Settings → Container Engine** —
+"bring your own Hermes" on any engine/host still works too; just enter the
+URL + key in the wizard and the app auto-detects a reachable Hermes via
+`/v1/health`.)
 
 ### 1c. Verify
 
@@ -121,9 +138,12 @@ If it 200s, paraphrase will work end-to-end.
 
 ## 3. Bring up the Faceplate sidecar
 
-The sidecar is a Docker container that exposes OpenAI-compatible TTS, ASR,
-and wake-word — no LLM, no LiteRT-LM (that lives on the host). Three image
-variants, all functionally identical for the audio surface:
+The sidecar is a plain container (Podman or Docker) that exposes
+OpenAI-compatible TTS, ASR, and wake-word — no LLM, no LiteRT-LM (that lives
+on the host). Image acquisition is pull-first, build-fallback: `make up`
+pulls `ghcr.io/nousresearch/hermes-faceplate-sidecar:<variant>` and only
+builds from `Dockerfile.<variant>` if the pull fails (offline / dev). Three
+image variants, all functionally identical for the audio surface:
 
 | Tag | Size | What you get |
 |---|---|---|
@@ -172,7 +192,7 @@ Electron opens. Two things will happen on first launch:
 |---|---|
 | Welcome | Click "Get started" |
 | **Connect to hermes-agent** | URL: `http://127.0.0.1:8642/v1` · API_SERVER_KEY from step 1a · click "Re-probe" — should show ✅ Reachable + `model: hermes-agent`. If `~/.hermes/` is on this same machine, you'll also see "Local config also detected" |
-| **Speech sidecar** | Mode: **Bundled Docker** · Image: matches what you ran with `make up` |
+| **Speech sidecar** | Mode: **Bundled (Podman / Docker)** · Image: matches what you ran with `make up` |
 | **Test endpoints** | Click each: agent → 200, llm → 200 (only if local config is readable), tts → 200, asr → 200, paraphrase → 200 |
 | **Voice** | Pick **Off** to start (you can flip to PTT or Wake later) |
 | **Display** | Overlay (recommended on macOS) |
@@ -207,7 +227,7 @@ Settings → Hotkeys shows a green "Accessibility granted" banner once done.
 |---|---|---|
 | **LiteRT-LM CLI** (`litert-lm`, ~20 MB) | ✅ via pipx by `make litert-up` | pipx venv (`~/.local/pipx/venvs/litert-lm/`) |
 | **Gemma 4 E2B IT** (`gemma-4-E2B-it.litertlm`, ~2.6 GB) | ✅ on first `litert-lm import` (called by `make litert-up`) | HuggingFace cache (`~/.cache/huggingface/`) |
-| **Piper voice** (`en_US-amy-medium.onnx`, ~60 MB) | ✅ on first sidecar start (entrypoint.sh pulls from `rhasspy/piper-voices`) | `faceplate-voices` Docker volume |
+| **Piper voice** (`en_US-amy-medium.onnx`, ~60 MB) | ✅ on first sidecar start (entrypoint.sh pulls from `rhasspy/piper-voices`) | `faceplate-voices` named volume |
 | **faster-whisper-small.en** (~480 MB int8) | ✅ on first transcription request | `faceplate-models` volume → `HF_HOME` |
 | **openWakeWord model** (`hey_hermes.onnx`) | ❌ NOT shipped — wake-word is off by default. Drop your own `.onnx` into the `faceplate-wakewords` volume to enable. See `sidecar/wakewords/README.md` | `faceplate-wakewords` volume |
 | **Custom Piper voices** | ❌ — pull manually if you want a non-default voice | `faceplate-voices` volume |
@@ -215,6 +235,12 @@ Settings → Hotkeys shows a green "Accessibility granted" banner once done.
 First cold-start is slow because LiteRT-LM downloads the model (~1–2 GB),
 Piper downloads its voice (~60 MB), and faster-whisper downloads its weights
 (~480 MB) on first use. After that, restarts hit cache and are sub-second.
+
+The sidecar's model caches live in named container volumes
+(`faceplate-models` / `faceplate-voices` / `faceplate-wakewords`), which are
+per-engine — moving Docker→Podman re-downloads them once. Hermes data, by
+contrast, is a `~/.hermes` host bind mount and survives engine switches
+untouched. Budget ≥ 20 GB free disk (the Hermes image alone is ~6 GB).
 
 ---
 
@@ -284,23 +310,27 @@ make clean                        # also drop sidecar volumes (models cache, voi
 Every `make` target above is just a thin wrapper. If you can't (or don't
 want to) install Make, run these instead.
 
+`$ENGINE` below is `podman` or `docker` — whatever you resolved to (set
+`CONTAINER_ENGINE=podman` / `=docker` to pin it).
+
 | Make target | Raw equivalent |
 |---|---|
 | `make hermes-up` | `bash scripts/start-hermes.sh` (works as-is — POSIX shell, no Make required) |
-| `make hermes-down` | `docker rm -f hermes-personal` |
-| `make hermes-logs` | `docker logs -f hermes-personal` |
+| `make hermes-down` | `$ENGINE rm -f hermes-personal` |
+| `make hermes-logs` | `$ENGINE logs -f hermes-personal` |
 | `make litert-up` | `bash scripts/start-litert.sh` (POSIX shell) |
 | `make litert-down` | `kill $(cat ~/.faceplate/litert.pid) && rm ~/.faceplate/litert.pid` |
 | `make litert-logs` | `tail -f ~/.faceplate/litert.log` |
 | `make setup` | `cp sidecar/config.example.yaml sidecar/config.yaml && openssl rand -hex 32 > sidecar/.faceplate-api-key && chmod 600 sidecar/.faceplate-api-key && cd app && pnpm install` |
-| `make up` | `FACEPLATE_API_KEY=$(cat sidecar/.faceplate-api-key) docker compose -f sidecar/compose.cpu.yml up -d --build` |
-| `make down` | `docker compose -f sidecar/compose.cpu.yml down` |
+| `make up` | `CONTAINER_ENGINE=$ENGINE bash scripts/start-sidecar.sh` (plain `run`, no compose, no `--build`) |
+| `make down` | `$ENGINE rm -f faceplate-sidecar` |
 | `make restart` | `make down` + `make up` |
-| `make logs` | `docker compose -f sidecar/compose.cpu.yml logs -f sidecar` |
+| `make logs` | `$ENGINE logs -f faceplate-sidecar` |
 | `make app` | `cd app && pnpm dev` |
 | `make verify` | `curl http://127.0.0.1:8642/v1/health` + `curl http://127.0.0.1:8080/health` + TCP probe of `127.0.0.1:7860` |
-| `make clean` | `docker compose -f sidecar/compose.cpu.yml down -v` |
+| `make clean` | `$ENGINE rm -f faceplate-sidecar` + `$ENGINE volume rm faceplate-models faceplate-voices faceplate-wakewords` |
 | `make all` | `make hermes-up && make litert-up && make setup && make up` (four commands in sequence) |
 
-For a different image variant, swap `compose.cpu.yml` for
-`compose.cpu-slim.yml` or `compose.cuda.yml`.
+For a different image variant, pass `SIDECAR_VARIANT=cpu-slim` /
+`SIDECAR_VARIANT=cuda` to `make up` (or `scripts/start-sidecar.sh`), or set
+`speech.sidecar_image` in settings — the deleted compose files are gone.

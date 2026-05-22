@@ -103,6 +103,17 @@ export interface PodmanInstallResult {
   error?: string;
 }
 
+/** Legacy Docker containers found during the Podman migration. */
+export interface LegacyDockerScan {
+  docker_available: boolean;
+  containers: Array<{ name: string; image: string; state: string }>;
+}
+
+export interface LegacyOffboardResult {
+  removed: string[];
+  failed: Array<{ name: string; error: string }>;
+}
+
 /** App-managed Hermes Agent container state (hermes-lifecycle.ts). */
 export interface HermesAgentStatus {
   engine: string;
@@ -121,6 +132,15 @@ export interface HermesAgentInstallResult {
   steps: string[];
   status: HermesAgentStatus | null;
   error?: string;
+}
+
+/** Streamed install progress.
+ *  - `step`   : a milestone — append to the visible list.
+ *  - `status` : transient sub-progress (live pull/build/poll line) —
+ *               replace the single current-step label only, never append. */
+export interface HermesInstallProgress {
+  kind: 'step' | 'status';
+  message: string;
 }
 
 /** Frame shape pushed by the Hermes faceplate plugin's WebSocket server.
@@ -330,6 +350,10 @@ export interface FaceplatePreload {
     installAgent(): Promise<HermesAgentInstallResult>;
     /** Remove the managed container (data volume ~/.hermes preserved). */
     stopAgent(): Promise<HermesAgentStatus>;
+    /** Subscribe to live install progress lines while `installAgent()`
+     *  runs (pull/build/create/health can take minutes). Returns an
+     *  unsubscribe fn. */
+    onAgentInstallProgress(cb: (p: HermesInstallProgress) => void): () => void;
   };
   window: {
     setClickThrough(enabled: boolean): Promise<void>;
@@ -440,6 +464,12 @@ export interface FaceplatePreload {
     ensureMachine(): Promise<PodmanMachineState>;
     /** Stop the VM (explicit user action). */
     stopMachine(): Promise<PodmanMachineState>;
+    /** Migration: list leftover Docker containers (hermes-personal,
+     *  faceplate-sidecar, …) that would clash on ports. */
+    legacyScan(): Promise<LegacyDockerScan>;
+    /** Migration: `docker rm -f` the named legacy containers (confirm-
+     *  gated in the UI; only known names are honored). */
+    offboardLegacy(names: string[]): Promise<LegacyOffboardResult>;
   };
   notify: {
     /** Fire an OS notification. The main process gates on settings
@@ -547,6 +577,8 @@ export const IPC = {
     agentStatus: 'faceplate:hermes:agent-status',
     agentInstall: 'faceplate:hermes:agent-install',
     agentStop: 'faceplate:hermes:agent-stop',
+    /** main → renderer: streamed install progress lines. */
+    agentInstallProgress: 'faceplate:hermes:agent-install-progress',
   },
   window: {
     setClickThrough: 'faceplate:window:set-click-through',
@@ -617,6 +649,10 @@ export const IPC = {
     ensureMachine: 'faceplate:podman:ensure-machine',
     /** renderer → main: stop the podman machine VM. */
     stopMachine: 'faceplate:podman:stop-machine',
+    /** renderer → main: scan for leftover Docker containers. */
+    legacyScan: 'faceplate:podman:legacy-scan',
+    /** renderer → main: remove named legacy Docker containers. */
+    offboardLegacy: 'faceplate:podman:offboard-legacy',
   },
   platform: {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',

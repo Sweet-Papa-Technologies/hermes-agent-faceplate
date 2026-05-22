@@ -51,6 +51,14 @@ const hermes: FaceplatePreload['hermes'] = {
   agentStatus: () => ipcRenderer.invoke(IPC.hermes.agentStatus),
   installAgent: () => ipcRenderer.invoke(IPC.hermes.agentInstall),
   stopAgent: () => ipcRenderer.invoke(IPC.hermes.agentStop),
+  onAgentInstallProgress: (cb) => {
+    const listener = (
+      _e: unknown,
+      p: import('./preload-api').HermesInstallProgress,
+    ) => cb(p);
+    ipcRenderer.on(IPC.hermes.agentInstallProgress, listener);
+    return () => ipcRenderer.removeListener(IPC.hermes.agentInstallProgress, listener);
+  },
 };
 
 const win: FaceplatePreload['window'] = {
@@ -134,6 +142,9 @@ const podman: FaceplatePreload['podman'] = {
   install: () => ipcRenderer.invoke(IPC.podman.install),
   ensureMachine: () => ipcRenderer.invoke(IPC.podman.ensureMachine),
   stopMachine: () => ipcRenderer.invoke(IPC.podman.stopMachine),
+  legacyScan: () => ipcRenderer.invoke(IPC.podman.legacyScan),
+  offboardLegacy: (names: string[]) =>
+    ipcRenderer.invoke(IPC.podman.offboardLegacy, names),
 };
 
 const agentPush: FaceplatePreload['agentPush'] = {

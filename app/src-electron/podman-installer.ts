@@ -24,6 +24,8 @@ import {
   type PodmanStatus,
   type PodmanInstallResult,
   type PodmanMachineState,
+  type LegacyDockerScan,
+  type LegacyOffboardResult,
 } from './preload-api';
 
 const PKG_URL = 'https://github.com/containers/podman/releases/latest';
@@ -163,6 +165,71 @@ export async function installPodman(): Promise<PodmanInstallResult> {
   }
 }
 
+// ── migration: detect/offboard legacy Docker containers ────────────────
+//
+// After switching to Podman, a user's old *Docker* containers
+// (hermes-personal, faceplate-sidecar, searxng…) would double-bind ports
+// 8642/8080/9080. We detect them in Docker specifically (not the
+// abstracted engine) and let the user remove them — confirm-gated, never
+// automatic. ~/.hermes is a host bind mount so no Hermes data is lost; the
+// sidecar's named volumes simply re-download once on the Podman side.
+
+const LEGACY_NAMES = [
+  'hermes-personal',
+  'faceplate-sidecar',
+  'searxng',
+  'searxng-redis',
+  'hermes-faceplate-kokoro',
+];
+
+export async function scanLegacyDocker(): Promise<LegacyDockerScan> {
+  if (!(await toolAvailable('docker'))) {
+    return { docker_available: false, containers: [] };
+  }
+  let r;
+  try {
+    r = await runTool(
+      'docker',
+      ['ps', '-a', '--format', '{{.Names}}\t{{.Image}}\t{{.State}}'],
+      { timeoutMs: 15_000 },
+    );
+  } catch {
+    return { docker_available: true, containers: [] };
+  }
+  if (r.code !== 0) return { docker_available: true, containers: [] };
+  const containers: LegacyDockerScan['containers'] = [];
+  for (const line of r.stdout.split(/\r?\n/)) {
+    const [name, image, state] = line.trim().split('\t');
+    if (!name) continue;
+    if (LEGACY_NAMES.includes(name)) {
+      containers.push({ name, image: image ?? '', state: state ?? 'unknown' });
+    }
+  }
+  return { docker_available: true, containers };
+}
+
+export async function offboardLegacyDocker(
+  names: string[],
+): Promise<LegacyOffboardResult> {
+  const removed: string[] = [];
+  const failed: Array<{ name: string; error: string }> = [];
+  for (const name of names) {
+    // Only ever touch names we know are ours.
+    if (!LEGACY_NAMES.includes(name)) {
+      failed.push({ name, error: 'refusing to remove an unrecognized container' });
+      continue;
+    }
+    try {
+      const r = await runTool('docker', ['rm', '-f', name], { timeoutMs: 30_000 });
+      if (r.code === 0) removed.push(name);
+      else failed.push({ name, error: (r.stderr || r.stdout).trim().slice(-160) });
+    } catch (err) {
+      failed.push({ name, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { removed, failed };
+}
+
 export async function ensurePodmanMachine(): Promise<PodmanMachineState> {
   const state = await ensureMachine();
   return state;
@@ -178,4 +245,8 @@ export function registerPodmanIpc(): void {
   ipcMain.handle(IPC.podman.install, () => installPodman());
   ipcMain.handle(IPC.podman.ensureMachine, () => ensurePodmanMachine());
   ipcMain.handle(IPC.podman.stopMachine, () => stopPodmanMachine());
+  ipcMain.handle(IPC.podman.legacyScan, () => scanLegacyDocker());
+  ipcMain.handle(IPC.podman.offboardLegacy, (_e, names: string[]) =>
+    offboardLegacyDocker(names),
+  );
 }

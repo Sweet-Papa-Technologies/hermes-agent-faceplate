@@ -197,9 +197,12 @@ Log:          $(Join-Path $HermesPrefix 'install.log')
 
 Next steps:
   1. Launch HermesAgent Faceplate from the Start menu.
-  2. Complete the onboarding wizard — paste your Hermes gateway URL + API key.
-  3. (Optional) Run Kokoro TTS for higher-quality voices:
-     docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+  2. Complete the onboarding wizard — paste your Hermes gateway URL + API
+     key. No Hermes yet? Settings -> Container Engine installs Podman +
+     Hermes Agent in one click (Docker also supported).
+  3. (Optional) Higher-quality Kokoro TTS is one-click under
+     Settings -> Speech. Manual equivalent (Podman or Docker):
+     <engine> run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
 
 Uninstall:
   irm https://get.hermesagent.app/uninstall.ps1 | iex

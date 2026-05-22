@@ -40,6 +40,7 @@ import { registerAgentPushInstallerIpc } from './agent-push-installer';
 import { registerKokoroIpc } from './kokoro-lifecycle';
 import { registerPodmanIpc } from './podman-installer';
 import { registerHermesLifecycleIpc } from './hermes-lifecycle';
+import { resolveAndPersistEngine } from './container-runtime';
 import {
   ensureBootstrapConversation,
   registerConversationsIpc,
@@ -247,7 +248,13 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.hermesagent.faceplate');
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  // M5: turn `infra.container_engine: 'auto'` into a pinned engine
+  // (Podman-preferred, never yanking a running Docker setup) before any
+  // lifecycle IPC can be invoked. Best-effort — failures leave 'auto'.
+  await resolveAndPersistEngine().catch((e) =>
+    console.warn('[engine] resolution failed:', e),
+  );
   registerSettingsIpc();
   registerWindowIpc();
   registerHotkeysIpc();

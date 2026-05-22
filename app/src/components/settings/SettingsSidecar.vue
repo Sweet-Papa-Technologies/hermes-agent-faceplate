@@ -2,7 +2,7 @@
   <div>
     <h2>Speech Sidecar</h2>
     <p class="muted">
-      The bundled Docker sidecar exposes OpenAI-compatible TTS, ASR, and wake-word. You can also point at any external URL that satisfies the same shape. (The paraphrase LLM lives outside this container — see Settings → Paraphrase.)
+      The bundled sidecar runs as a local container (Podman by default, or Docker — see Settings → Container Engine) and exposes OpenAI-compatible TTS, ASR, and wake-word. You can also point at any external URL that satisfies the same shape. (The paraphrase LLM lives outside this container — see Settings → Paraphrase.)
     </p>
 
     <q-card flat bordered class="card">
@@ -98,7 +98,7 @@
           </q-banner>
           <q-banner v-if="kokoroStatus && !kokoroStatus.docker_available" class="warn q-mt-sm" dense>
             <template #avatar><q-icon name="warning" color="warning" /></template>
-            Docker isn't installed (or isn't on PATH). Install Docker Desktop, then come back here.
+            No container engine is available. Open Settings → Container Engine to install Podman (or start its VM / enable Docker), then come back here.
           </q-banner>
         </div>
       </q-card-section>
@@ -308,7 +308,7 @@ const kokoroPrimary = computed<'install' | 'start' | 'stop' | 'none'>(() => {
 const kokoroChip = computed(() => {
   const s = kokoroStatus.value;
   if (!s) return { label: 'Checking…', icon: 'hourglass_top', color: 'grey-6' };
-  if (!s.docker_available) return { label: 'Docker not found', icon: 'block', color: 'grey-6' };
+  if (!s.docker_available) return { label: 'No container engine', icon: 'block', color: 'grey-6' };
   if (s.reachable) return { label: 'Reachable', icon: 'check_circle', color: 'positive' };
   if (s.container_state === 'running') return { label: 'Container up, not yet ready', icon: 'sync', color: 'orange' };
   if (s.container_state === 'exited') return { label: 'Container stopped', icon: 'pause_circle', color: 'grey-6' };
@@ -565,7 +565,7 @@ onMounted(() => {
 });
 
 const modeOptions = [
-  { label: 'Bundled Docker (recommended)', value: 'bundled' },
+  { label: 'Bundled (recommended)', value: 'bundled' },
   { label: 'External URL', value: 'external' },
   { label: 'Disabled', value: 'disabled' },
 ];

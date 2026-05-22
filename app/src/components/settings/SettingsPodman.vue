@@ -9,6 +9,26 @@
 
     <q-card flat bordered class="card">
       <q-card-section>
+        <q-item-label class="q-mb-xs">Engine preference</q-item-label>
+        <q-btn-toggle
+          v-model="engine"
+          no-caps
+          dense
+          spread
+          toggle-color="primary"
+          :options="[
+            { label: 'Auto (recommended)', value: 'auto' },
+            { label: 'Podman', value: 'podman' },
+            { label: 'Docker', value: 'docker' },
+          ]"
+        />
+        <p class="muted q-mt-sm" style="margin-bottom: 0;">
+          Auto = Podman if installed, otherwise your existing Docker (a
+          running Docker Hermes is never disrupted). Resolves on next launch.
+        </p>
+      </q-card-section>
+      <q-separator />
+      <q-card-section>
         <div class="row items-center q-gutter-sm">
           <q-chip
             :color="status?.engine === 'podman' ? 'primary' : 'grey-7'"
@@ -148,16 +168,57 @@
         />
       </q-card-section>
 
-      <q-card-section v-if="hermesSteps.length" class="steps">
-        <div v-for="(s, i) in hermesSteps" :key="i" class="step">▸ {{ s }}</div>
+      <q-card-section v-if="hermesBusy || hermesSteps.length">
+        <template v-if="hermesBusy">
+          <div class="row items-center q-gutter-sm q-mb-xs">
+            <q-spinner size="18px" />
+            <span class="text-weight-medium">{{ hermesCurrent || 'Working…' }}</span>
+          </div>
+          <q-linear-progress indeterminate rounded color="primary" class="q-mb-sm" />
+          <p class="muted" style="margin: 0 0 8px;">
+            This can take several minutes on first run (pulls a ~5.5 GB image,
+            then re-maps the data volume). Safe to leave running.
+          </p>
+        </template>
+        <div class="steps">
+          <div v-for="(s, i) in hermesSteps" :key="i" class="step">▸ {{ s }}</div>
+        </div>
       </q-card-section>
     </q-card>
 
+    <template v-if="legacy && legacy.containers.length">
+      <h2 class="q-mt-lg">Migrate off Docker</h2>
+      <p class="muted">
+        Leftover Docker containers found. They'd clash on ports with the
+        Podman ones. Removing them is safe — Hermes data lives in
+        <code>~/.hermes</code> (a host folder, not a container); the sidecar
+        re-downloads its models once.
+      </p>
+      <q-card flat bordered class="card">
+        <q-card-section class="steps">
+          <div v-for="c in legacy.containers" :key="c.name" class="step">
+            ▸ {{ c.name }} ({{ c.state }}, {{ c.image }})
+          </div>
+        </q-card-section>
+        <q-separator />
+        <q-card-section>
+          <q-btn
+            no-caps
+            color="negative"
+            icon="delete_sweep"
+            label="Remove leftover Docker containers"
+            :loading="offboarding"
+            @click="onOffboard"
+          />
+        </q-card-section>
+      </q-card>
+    </template>
+
     <p class="muted q-mt-md">
       First machine creation downloads a ~1&nbsp;GB VM image and the Hermes
-      image is ~6&nbsp;GB — keep at least 20&nbsp;GB free. Default engine is
-      Docker until the migration completes; set
-      <code>FACEPLATE_CONTAINER_ENGINE=podman</code> to try Podman now.
+      image is ~6&nbsp;GB — keep at least 20&nbsp;GB free. The active engine
+      resolves on launch (Podman preferred); the
+      <code>FACEPLATE_CONTAINER_ENGINE</code> env var overrides everything.
     </p>
   </div>
 </template>
@@ -166,10 +227,14 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useQuasar } from 'quasar';
 
+import { useSetting } from '../../composables/use-setting';
 import type {
   PodmanStatus,
   HermesAgentStatus,
+  LegacyDockerScan,
 } from '../../../src-electron/preload-api';
+
+const engine = useSetting('infra.container_engine');
 
 const $q = useQuasar();
 const status = ref<PodmanStatus | null>(null);
@@ -182,12 +247,17 @@ const manualCommand = ref<string | null>(null);
 const agent = ref<HermesAgentStatus | null>(null);
 const hermesBusy = ref(false);
 const hermesSteps = ref<string[]>([]);
+const hermesCurrent = ref('');
+let unsubProgress: (() => void) | null = null;
+
+const legacy = ref<LegacyDockerScan | null>(null);
+const offboarding = ref(false);
 
 const engineHint = computed(() => {
   const s = status.value;
   if (!s) return 'Checking…';
   if (s.engine !== 'podman') {
-    return `Currently using "${s.engine}". Podman is not the active engine yet (the default flips later in the migration).`;
+    return `Currently using "${s.engine}". Pick "Podman" or "Auto" above to switch (applies on next launch).`;
   }
   if (!s.installed) return 'Podman is selected but not installed — install it below.';
   if (s.machine?.applicable && !s.machine.running) {
@@ -206,9 +276,48 @@ async function refresh(): Promise<void> {
     ]);
     status.value = p;
     agent.value = a;
+    legacy.value = await window.faceplate.podman.legacyScan();
   } finally {
     checking.value = false;
   }
+}
+
+async function onOffboard(): Promise<void> {
+  const fp = window.faceplate;
+  if (!fp || !legacy.value) return;
+  const names = legacy.value.containers.map((c) => c.name);
+  $q.dialog({
+    title: 'Remove leftover Docker containers?',
+    message: `Will run:\n\n  docker rm -f ${names.join(' ')}\n\nHermes data in ~/.hermes is preserved (host folder, not a container).`,
+    style:
+      'white-space: pre-wrap; font: 12px/1.4 "JetBrains Mono", ui-monospace, monospace; max-width: 640px;',
+    cancel: { label: 'Cancel', flat: true, noCaps: true },
+    ok: { label: 'Remove', noCaps: true, color: 'negative' },
+    persistent: true,
+  }).onOk(() => {
+    void (async () => {
+      offboarding.value = true;
+      try {
+        const r = await fp.podman.offboardLegacy(names);
+        if (r.failed.length === 0) {
+          $q.notify({
+            type: 'positive',
+            message: `Removed ${r.removed.length} container(s).`,
+            timeout: 4000,
+          });
+        } else {
+          $q.notify({
+            type: 'warning',
+            message: `Removed ${r.removed.length}; ${r.failed.length} failed.`,
+            timeout: 7000,
+          });
+        }
+      } finally {
+        offboarding.value = false;
+        void refresh();
+      }
+    })();
+  });
 }
 
 async function onInstallHermes(): Promise<void> {
@@ -216,9 +325,11 @@ async function onInstallHermes(): Promise<void> {
   if (!fp) return;
   hermesBusy.value = true;
   hermesSteps.value = [];
+  hermesCurrent.value = 'Starting…';
   try {
     const r = await fp.hermes.installAgent();
-    hermesSteps.value = r.steps;
+    hermesSteps.value = r.steps; // authoritative final list
+    hermesCurrent.value = '';
     if (r.ok) {
       $q.notify({ type: 'positive', message: 'Hermes Agent is up.', timeout: 5000 });
     } else {
@@ -232,6 +343,7 @@ async function onInstallHermes(): Promise<void> {
     });
   } finally {
     hermesBusy.value = false;
+    hermesCurrent.value = '';
     void refresh();
   }
 }
@@ -319,10 +431,23 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   void refresh();
   pollTimer = setInterval(() => void refresh(), 5_000);
+  // Live install progress: append each streamed line and surface the
+  // latest as the current-step label.
+  if (window.faceplate) {
+    unsubProgress = window.faceplate.hermes.onAgentInstallProgress((p) => {
+      hermesCurrent.value = p.message;
+      // Milestones grow the list; transient status only moves the label
+      // (so thousands of streamed pull/build lines never bloat the UI).
+      if (p.kind === 'step') {
+        hermesSteps.value = [...hermesSteps.value, p.message];
+      }
+    });
+  }
 });
 
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer);
+  if (unsubProgress) unsubProgress();
 });
 </script>
 
