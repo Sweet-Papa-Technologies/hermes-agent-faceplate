@@ -2,7 +2,7 @@
   <div>
     <h2>Paraphrase</h2>
     <p class="muted">
-      Long agent responses are shortened for spoken delivery; the full transcript stays in captions. Paraphrase reuses hermes-agent's configured LLM by default and falls through to the bundled on-device model when the network is unreachable.
+      Long agent responses are shortened for spoken delivery; the full transcript stays in captions. Paraphrase reuses hermes-agent's configured LLM directly; if that LLM can't be reached, the full text is spoken unchanged.
     </p>
 
     <q-card flat bordered class="card">
@@ -31,18 +31,8 @@
         <q-option-group v-model="model" :options="modelOptions" type="radio" />
         <q-banner v-if="!canBypass && model === 'reuse_hermes_llm'" class="warning q-mt-sm" dense>
           <template #avatar><q-icon name="warning" color="warning" /></template>
-          Local <code>~/.hermes/</code> isn't readable on this machine, so we can't reach your underlying LLM directly. Paraphrase will fall back to local litert-lm until you run hermes-agent locally or switch to "Local litert-lm".
+          Local <code>~/.hermes/</code> isn't readable on this machine, so we can't reach your underlying LLM directly. Paraphrase will be skipped and the full text spoken until you run hermes-agent on this machine.
         </q-banner>
-      </q-card-section>
-      <q-separator v-if="model === 'local_litert'" />
-      <q-card-section v-if="model === 'local_litert'">
-        <q-input
-          v-model="litertUrl"
-          label="litert-lm endpoint URL"
-          filled
-          stack-label
-          hint="Default: http://127.0.0.1:7860/v1 — started on the host by `make litert-up`."
-        />
       </q-card-section>
       <q-separator />
       <q-card-section>
@@ -87,7 +77,6 @@ const trigger = useSetting('paraphrase.trigger_chars');
 const target = useSetting('paraphrase.target_words');
 const model = useSetting('paraphrase.model');
 const prompt = useSetting('paraphrase.system_prompt');
-const litertUrl = useSetting('paraphrase.litert_lm_url');
 
 const discovery = useDiscoveryStore();
 const canBypass = computed(() => discovery.canBypassParaphrase);
@@ -98,36 +87,31 @@ const sample = ref(
 const result = ref<ParaphraseOutcome | null>(null);
 const loading = ref(false);
 
-// LiteRT option is hidden in v1 — the bundled Gemma sidecar is too small to
-// follow the summarization prompt reliably, and reuse_hermes_llm produces
-// substantially better results for the same latency budget. The schema enum
-// + paraphrase-bridge code paths still support 'local_litert' so a power
-// user can opt in via settings.yaml; we just don't surface it in the UI.
 const modelOptions = [
   { label: "Reuse hermes-agent's configured LLM (default)", value: 'reuse_hermes_llm' },
   { label: 'Disabled — always speak the full text', value: 'disabled' },
 ];
 
 const resultBanner = computed(() => {
-  if (!result.value) return '';
-  if (result.value.used === 'skipped') return 'Below trigger threshold — original returned unchanged.';
-  if (result.value.used === 'disabled') return 'Paraphrase is disabled.';
-  if (result.value.used === 'reuse_hermes_llm') return `hermes LLM (${result.value.latency_ms} ms)`;
-  if (result.value.used === 'local_litert') {
-    if (result.value.fallback_reason === 'unsafe_to_bypass') {
-      return `local litert-lm (${result.value.latency_ms} ms) — local hermes config not readable; bypassing through hermes' agent loop would corrupt sessions.`;
+  const r = result.value;
+  if (!r) return '';
+  if (r.used === 'disabled') return 'Paraphrase is disabled.';
+  if (r.used === 'reuse_hermes_llm') return `hermes LLM (${r.latency_ms} ms)`;
+  if (r.used === 'skipped') {
+    if (r.fallback_reason === 'unsafe_to_bypass') {
+      return "Skipped — local ~/.hermes config isn't readable, so the underlying LLM can't be reached directly. Full text spoken.";
     }
-    if (result.value.fallback_reason === 'unreachable') {
-      return `local litert-lm (${result.value.latency_ms} ms) — hermes LLM unreachable.`;
+    if (r.fallback_reason === 'unreachable') {
+      return 'Skipped — the hermes LLM was unreachable. Full text spoken.';
     }
-    return `local litert-lm (${result.value.latency_ms} ms)`;
+    return 'Below trigger threshold — original returned unchanged.';
   }
-  return result.value.used;
+  return r.used;
 });
 
 const resultClass = computed(() => {
   const used = result.value?.used;
-  if (used === 'reuse_hermes_llm' || used === 'local_litert') return 'banner-ok';
+  if (used === 'reuse_hermes_llm') return 'banner-ok';
   if (used === 'skipped' || used === 'disabled') return 'banner-info';
   return '';
 });

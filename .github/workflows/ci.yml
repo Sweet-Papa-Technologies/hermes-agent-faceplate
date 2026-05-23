@@ -1,11 +1,8 @@
 name: CI
 
-# Lean guard (M6 of the Podman migration — docs/v1/podman-migration-plan.md).
-# Deliberately does NOT build the Hermes/sidecar container images: M0 found
-# they're ~6 GB (and the macOS/Win podman VM ~14 GB), which doesn't fit
-# standard GitHub runners. Instead this gate catches the regressions that
-# matter: type errors, a broken Electron build, shell-script syntax, and
-# the engine-abstraction / no-compose invariants.
+# Lean gate: type errors + a broken Electron build across the three desktop
+# targets. The Faceplate is a thin client — it ships as a packaged Electron
+# app and builds no container images, so there is nothing heavier to check.
 
 on:
   push:
@@ -20,39 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  guard:
-    name: scripts + engine-abstraction guard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Shell scripts parse (bash -n)
-        run: |
-          set -e
-          for s in scripts/*.sh installer/install.sh; do
-            bash -n "$s" && echo "ok  $s"
-          done
-
-      - name: No `compose` invocations resurfaced (Decision #5)
-        run: |
-          if grep -RnE '\b(docker|podman) compose -f' Makefile scripts/; then
-            echo "::error::a 'compose -f' invocation came back — the migration removed compose"
-            exit 1
-          fi
-          echo "no compose invocations — ok"
-
-      - name: Makefile engine substitution works
-        run: |
-          set -e
-          default="$(make -n hermes-down 2>/dev/null | grep -m1 -oE '(podman|docker) rm -f hermes-personal' || true)"
-          forced="$(make -n hermes-down ENGINE=docker 2>/dev/null | grep -m1 -oE 'docker rm -f hermes-personal' || true)"
-          test -n "$default" || { echo "::error::ENGINE default did not resolve"; exit 1; }
-          test "$forced" = "docker rm -f hermes-personal" || { echo "::error::ENGINE=docker override broken"; exit 1; }
-          echo "default => $default ; ENGINE=docker => $forced"
-
   build:
     name: typecheck + build (${{ matrix.os }})
-    needs: guard
     strategy:
       fail-fast: false
       matrix:

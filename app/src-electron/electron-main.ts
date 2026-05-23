@@ -37,16 +37,11 @@ import { registerNotificationsIpc } from './notifications-bridge';
 import { registerArtifactFixIpc } from './artifact-fix-bridge';
 import { startAgentPushBridge, stopAgentPushBridge } from './agent-push-bridge';
 import { registerAgentPushInstallerIpc } from './agent-push-installer';
-import { registerKokoroIpc } from './kokoro-lifecycle';
-import { registerPodmanIpc } from './podman-installer';
-import { registerHermesLifecycleIpc } from './hermes-lifecycle';
-import { resolveAndPersistEngine } from './container-runtime';
 import {
   ensureBootstrapConversation,
   registerConversationsIpc,
 } from './conversation-store';
 import { registerArtifactsIpc } from './artifact-store';
-import { ensureCanvasSkillInstalled } from './canvas-skill-installer';
 
 // One-shot migration: if the user's paraphrase.system_prompt matches a
 // literal previous default, upgrade to the current default AND reset the
@@ -74,19 +69,6 @@ function migrateParaphrasePrompt(): void {
     `[main] migrated paraphrase: system_prompt → new default, ` +
     `trigger_chars=${NEW_TRIGGER_CHARS}, target_words=${NEW_TARGET_WORDS}`,
   );
-}
-
-// One-shot migration: bump existing users off `local_litert` → `reuse_hermes_llm`
-// since the LiteRT option is hidden in v1 (the bundled Gemma-4-E2B is too
-// small to follow the summarize prompt reliably). The schema enum still
-// accepts 'local_litert' so power users can opt in by editing settings.yaml,
-// but the default + UI option is gone. Leave 'disabled' alone — that's an
-// explicit user choice.
-function migrateParaphraseModelAwayFromLitert(): void {
-  const current = getSettings().paraphrase.model;
-  if (current !== 'local_litert') return;
-  applyPatch({ paraphrase: { model: 'reuse_hermes_llm' } });
-  console.log("[main] migrated paraphrase.model: local_litert → reuse_hermes_llm");
 }
 
 // One-shot: seed `hermes.api_key` from ~/.hermes/.env when empty. The wizard
@@ -131,23 +113,19 @@ function seedSidecarTokenFromMakefileCache(): void {
   }
 }
 
-// Hermes-agent's API server, the Faceplate sidecar, and litert-lm don't
-// emit CORS response headers — they assume same-origin clients (curl, the
-// hermes CLI, etc.). The Faceplate's renderer runs at http://localhost:9300
-// in dev / file:// in prod, so a browser would block every fetch on
-// preflight. Since this is a desktop app talking to its own local services,
-// we inject permissive CORS headers in main for those specific upstreams.
-// We do NOT touch responses from arbitrary URLs — the allowlist is the
-// three host:ports configured in settings, plus their loopback aliases.
+// Hermes-agent's API server and the Faceplate sidecar don't emit CORS
+// response headers — they assume same-origin clients (curl, the hermes CLI,
+// etc.). The Faceplate's renderer runs at http://localhost:9300 in dev /
+// file:// in prod, so a browser would block every fetch on preflight. Since
+// this is a desktop app talking to its own local services, we inject
+// permissive CORS headers in main for those specific upstreams. We do NOT
+// touch responses from arbitrary URLs — the allowlist is the host:ports
+// configured in settings, plus their loopback aliases.
 function installCorsHeaderInjection(): void {
   const allowedHosts = (): Set<string> => {
     const s = getSettings();
     const hosts = new Set<string>();
-    for (const url of [
-      s.hermes.base_url,
-      s.speech.sidecar_url,
-      s.paraphrase.litert_lm_url,
-    ]) {
+    for (const url of [s.hermes.base_url, s.speech.sidecar_url]) {
       try {
         const u = new URL(url);
         hosts.add(u.host); // host:port — matches webRequest URL parsing
@@ -248,13 +226,7 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.hermesagent.faceplate');
 }
 
-void app.whenReady().then(async () => {
-  // M5: turn `infra.container_engine: 'auto'` into a pinned engine
-  // (Podman-preferred, never yanking a running Docker setup) before any
-  // lifecycle IPC can be invoked. Best-effort — failures leave 'auto'.
-  await resolveAndPersistEngine().catch((e) =>
-    console.warn('[engine] resolution failed:', e),
-  );
+void app.whenReady().then(() => {
   registerSettingsIpc();
   registerWindowIpc();
   registerHotkeysIpc();
@@ -272,9 +244,6 @@ void app.whenReady().then(async () => {
   registerArtifactFixIpc();
   startAgentPushBridge();
   registerAgentPushInstallerIpc();
-  registerKokoroIpc();
-  registerPodmanIpc();
-  registerHermesLifecycleIpc();
 
   // Catch every webContents (avatar, canvas, settings, …) and route any
   // attempt to open a new window — `target="_blank"`, `window.open()`, or
@@ -299,13 +268,7 @@ void app.whenReady().then(async () => {
   // has somewhere to land. Creates a fresh empty one on first run.
   ensureBootstrapConversation();
 
-  // Auto-install the Hermes-side skill that teaches the model the inline
-  // <artifact> output protocol. Idempotent + version-gated so user edits
-  // don't get clobbered. Silent no-op if ~/.hermes doesn't exist yet.
-  ensureCanvasSkillInstalled();
-
   migrateParaphrasePrompt();
-  migrateParaphraseModelAwayFromLitert();
   seedHermesApiKeyFromLocalEnv();
   seedSidecarTokenFromMakefileCache();
   installCorsHeaderInjection();

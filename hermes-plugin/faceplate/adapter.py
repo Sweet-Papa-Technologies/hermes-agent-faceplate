@@ -72,6 +72,10 @@ class FaceplateAdapter(BasePlatformAdapter):  # type: ignore[misc]
         super().__init__(ctx)
         self._api_key = os.environ.get("FACEPLATE_API_KEY", "")
         self._port = int(os.environ.get("FACEPLATE_PORT", DEFAULT_PORT))
+        # Listen interface. 127.0.0.1 when the Faceplate runs on the same
+        # machine as Hermes; set FACEPLATE_BIND to a reachable address
+        # (e.g. 0.0.0.0) when the Faceplate connects from another host.
+        self._bind = os.environ.get("FACEPLATE_BIND", "127.0.0.1")
         self._home_channel = os.environ.get("FACEPLATE_HOME_CHANNEL", "default")
         # chat_id -> set of WS connections subscribed to that chat_id.
         # A "*" wildcard subscription receives every frame regardless of
@@ -92,9 +96,9 @@ class FaceplateAdapter(BasePlatformAdapter):  # type: ignore[misc]
         app.router.add_get("/health", self._on_health)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
-        self._site = web.TCPSite(self._runner, "127.0.0.1", self._port)
+        self._site = web.TCPSite(self._runner, self._bind, self._port)
         await self._site.start()
-        log.info("[faceplate] listening on ws://127.0.0.1:%d/ws", self._port)
+        log.info("[faceplate] listening on ws://%s:%d/ws", self._bind, self._port)
 
     async def stop(self) -> None:
         if self._site is not None:

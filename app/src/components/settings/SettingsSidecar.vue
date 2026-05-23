@@ -2,7 +2,7 @@
   <div>
     <h2>Speech Sidecar</h2>
     <p class="muted">
-      The bundled sidecar runs as a local container (Podman by default, or Docker — see Settings → Container Engine) and exposes OpenAI-compatible TTS, ASR, and wake-word. You can also point at any external URL that satisfies the same shape. (The paraphrase LLM lives outside this container — see Settings → Paraphrase.)
+      The speech sidecar exposes OpenAI-compatible TTS, ASR, and wake-word. Run one with <code>setup/speech-sidecar.sh</code>, bring your own endpoint, or point at a remote one — then enter its URL below. (Paraphrase uses your Hermes LLM — see Settings → Paraphrase.)
     </p>
 
     <q-card flat bordered class="card">
@@ -41,70 +41,6 @@
         <q-option-group v-model="ttsEngine" type="radio" :options="engineOptions" inline />
       </q-card-section>
       <q-separator />
-      <q-card-section v-if="ttsEngine === 'kokoro'">
-        <!-- Kokoro lifecycle card. Polls every 3s while this tab is open
-             and surfaces a single primary action: install+start, start,
-             or stop, depending on what the main process found. If the
-             user runs Kokoro themselves under a different container
-             name, we detect "reachable but our container missing" and
-             hide the buttons (we don't own that). -->
-        <div class="kokoro-lifecycle">
-          <div class="kokoro-status-row">
-            <q-chip
-              :color="kokoroChip.color"
-              :icon="kokoroChip.icon"
-              text-color="white"
-              dense
-            >
-              {{ kokoroChip.label }}
-            </q-chip>
-            <q-chip v-if="kokoroStatus?.base_url" outline dense>
-              {{ kokoroStatus.base_url }}
-            </q-chip>
-          </div>
-          <div class="kokoro-actions q-mt-sm">
-            <q-btn
-              v-if="kokoroPrimary === 'install'"
-              color="primary"
-              no-caps
-              icon="rocket_launch"
-              :label="kokoroBusy ? 'Pulling image + starting (this can take a few minutes on first run)…' : 'Install + start Kokoro'"
-              :loading="kokoroBusy"
-              @click="ensureKokoro"
-            />
-            <q-btn
-              v-else-if="kokoroPrimary === 'start'"
-              color="primary"
-              no-caps
-              icon="play_arrow"
-              :label="kokoroBusy ? 'Starting…' : 'Start Kokoro'"
-              :loading="kokoroBusy"
-              @click="ensureKokoro"
-            />
-            <q-btn
-              v-else-if="kokoroPrimary === 'stop'"
-              outline
-              no-caps
-              icon="stop"
-              :label="kokoroBusy ? 'Stopping…' : 'Stop Kokoro'"
-              :loading="kokoroBusy"
-              @click="stopKokoroBtn"
-            />
-            <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="refreshKokoro" />
-          </div>
-          <q-banner v-if="kokoroError" class="warn q-mt-sm" dense>
-            <template #avatar><q-icon name="warning" color="warning" /></template>
-            {{ kokoroError }}
-          </q-banner>
-          <q-banner v-if="kokoroStatus && !kokoroStatus.docker_available" class="warn q-mt-sm" dense>
-            <template #avatar><q-icon name="warning" color="warning" /></template>
-            No container engine is available. Open Settings → Container Engine to install Podman (or start its VM / enable Docker), then come back here.
-          </q-banner>
-        </div>
-      </q-card-section>
-
-      <q-separator v-if="ttsEngine === 'kokoro'" />
-
       <q-card-section v-if="ttsEngine === 'kokoro'" class="row q-col-gutter-md">
         <q-input
           v-model="kokoroUrl"
@@ -112,7 +48,7 @@
           label="Kokoro FastAPI URL"
           filled
           stack-label
-          hint="Default: http://127.0.0.1:8880 — the lifecycle card above will install+start a container on this port for you."
+          hint="Default: http://127.0.0.1:8880 — run setup/speech-sidecar.sh, or bring your own Kokoro / OpenAI-compatible endpoint."
         />
         <q-select
           v-model="kokoroVoice"
@@ -152,23 +88,21 @@
           <q-slider v-model="ttsRate" :min="0.5" :max="2.0" :step="0.05" />
         </div>
         <q-expansion-item icon="tune" label="Advanced" class="col-12" header-class="text-grey-7" dense>
-          <q-select v-model="ttsModel" :options="ttsModelOptions" label="Model id" filled stack-label use-input new-value-mode="add-unique" :loading="loadingDiscovery" emit-value map-options class="q-mt-sm" hint="Auto-derived from the voice (piper:&lt;voice&gt;). Override only if you've added a custom backend." />
+          <q-select v-model="ttsModel" :options="ttsModelOptions" label="Model id" filled stack-label use-input new-value-mode="add-unique" :loading="loadingDiscovery" emit-value map-options class="q-mt-sm" hint="Auto-derived from the voice (kokoro:&lt;voice&gt;). Override only if you've added a custom backend." />
           <q-select v-model="ttsFormat" :options="formatOptions" label="Stream format (MSE)" filled stack-label emit-value map-options class="q-mt-sm" />
         </q-expansion-item>
       </q-card-section>
       <q-card-actions>
         <TestConnectionButton target="tts" label="Test TTS" />
-        <q-btn v-if="ttsEngine === 'piper'" flat dense no-caps icon="refresh" label="Refresh from sidecar" :loading="loadingDiscovery" @click="refreshDiscovery" />
+        <q-btn flat dense no-caps icon="refresh" label="Refresh from sidecar" :loading="loadingDiscovery" @click="refreshDiscovery" />
       </q-card-actions>
     </q-card>
 
     <h3>Voice catalog</h3>
     <q-card flat bordered class="card">
       <q-card-section class="muted">
-        Recommended Piper voices. The default (Amy) is bundled; the others
-        download to the sidecar volume on demand. Changing the active
-        voice above to one that isn't installed will silently fall back —
-        click <strong>Install</strong> first.
+        Kokoro voice catalog. All voices ship bundled with the model — the
+        picker above can switch between them without any download.
       </q-card-section>
       <q-list separator>
         <q-item v-for="v in catalog" :key="v.id">
@@ -224,7 +158,7 @@
       </q-card-actions>
     </q-card>
 
-    <h3>Container lifecycle</h3>
+    <h3>Sidecar status</h3>
     <q-card flat bordered class="card">
       <q-card-section class="row items-center q-gutter-sm">
         <q-chip :color="status?.up ? 'positive' : 'grey-6'" text-color="white" :icon="status?.up ? 'check_circle' : 'pause_circle'" dense>
@@ -237,10 +171,11 @@
           v{{ status.version }}
         </q-chip>
       </q-card-section>
+      <q-card-section class="muted">
+        The Faceplate connects to the sidecar by URL — start or stop it where it
+        runs (<code>setup/speech-sidecar.sh</code>, your own container, or a remote host).
+      </q-card-section>
       <q-card-actions>
-        <q-btn outline no-caps icon="play_arrow" label="Start" :loading="lifecycleBusy === 'start'" :disable="mode !== 'bundled'" @click="lifecycle('start')" />
-        <q-btn outline no-caps icon="stop" label="Stop" :loading="lifecycleBusy === 'stop'" :disable="mode !== 'bundled'" @click="lifecycle('stop')" />
-        <q-btn outline no-caps icon="restart_alt" label="Restart" :loading="lifecycleBusy === 'restart'" :disable="mode !== 'bundled'" @click="lifecycle('restart')" />
         <q-btn flat no-caps icon="refresh" label="Refresh status" @click="refreshStatus" />
       </q-card-actions>
     </q-card>
@@ -248,12 +183,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 
 import { useSetting } from '../../composables/use-setting';
 import TestConnectionButton from './TestConnectionButton.vue';
-import type { SidecarStatus, KokoroStatus } from '../../../src-electron/preload-api';
+import type { SidecarStatus } from '../../../src-electron/preload-api';
 
 const mode = useSetting('speech.sidecar_mode');
 const url = useSetting('speech.sidecar_url');
@@ -266,8 +201,7 @@ const kokoroUrl = useSetting('speech.tts.kokoro_url');
 const kokoroVoice = useSetting('speech.tts.kokoro_voice');
 
 const engineOptions = [
-  { label: 'Piper (bundled, fast, basic prosody)', value: 'piper' },
-  { label: 'Kokoro (separate sidecar, higher-quality voices)', value: 'kokoro' },
+  { label: 'Kokoro-82M (bundled in the sidecar — high-quality, low-latency)', value: 'kokoro' },
 ];
 
 // Hard-coded shortlist of the most useful Kokoro voices. Users can still
@@ -282,103 +216,19 @@ const kokoroVoiceOptions = [
   { label: 'bm_george — British male (B grade)', value: 'bm_george' },
 ];
 
-// ─── Kokoro lifecycle ────────────────────────────────────────────────────
-//
-// Status polled every 3 s while the user is on this tab. Drives a single
-// primary action button that adapts to current state. We never own a
-// container the user started themselves — if the endpoint is reachable
-// but our named container is missing, the buttons hide.
-const kokoroStatus = ref<KokoroStatus | null>(null);
-const kokoroBusy = ref(false);
-const kokoroError = ref<string | null>(null);
-let kokoroPollTimer: ReturnType<typeof setInterval> | null = null;
-
-const kokoroPrimary = computed<'install' | 'start' | 'stop' | 'none'>(() => {
-  const s = kokoroStatus.value;
-  if (!s) return 'none';
-  if (!s.docker_available) return 'none';
-  // If Kokoro is reachable but the container we manage isn't there, the
-  // user runs their own — don't offer to manage what we don't own.
-  if (s.reachable && s.container_state === 'missing') return 'none';
-  if (s.container_state === 'missing') return 'install';
-  if (s.container_state === 'exited') return 'start';
-  return 'stop';
-});
-
-const kokoroChip = computed(() => {
-  const s = kokoroStatus.value;
-  if (!s) return { label: 'Checking…', icon: 'hourglass_top', color: 'grey-6' };
-  if (!s.docker_available) return { label: 'No container engine', icon: 'block', color: 'grey-6' };
-  if (s.reachable) return { label: 'Reachable', icon: 'check_circle', color: 'positive' };
-  if (s.container_state === 'running') return { label: 'Container up, not yet ready', icon: 'sync', color: 'orange' };
-  if (s.container_state === 'exited') return { label: 'Container stopped', icon: 'pause_circle', color: 'grey-6' };
-  return { label: 'Not installed', icon: 'download', color: 'grey-6' };
-});
-
-async function refreshKokoro(): Promise<void> {
-  if (!window.faceplate) return;
-  try {
-    kokoroStatus.value = await window.faceplate.kokoro.status();
-  } catch (err) {
-    console.warn('[settings.sidecar] kokoro.status threw:', err);
-  }
-}
-
-async function ensureKokoro(): Promise<void> {
-  if (!window.faceplate || kokoroBusy.value) return;
-  kokoroBusy.value = true;
-  kokoroError.value = null;
-  try {
-    kokoroStatus.value = await window.faceplate.kokoro.ensure();
-    $q.notify({ type: 'positive', message: 'Kokoro is up and reachable.', timeout: 3000 });
-  } catch (err) {
-    kokoroError.value = err instanceof Error ? err.message : String(err);
-    $q.notify({ type: 'negative', message: kokoroError.value, timeout: 6000 });
-  } finally {
-    kokoroBusy.value = false;
-    void refreshKokoro();
-  }
-}
-
-async function stopKokoroBtn(): Promise<void> {
-  if (!window.faceplate || kokoroBusy.value) return;
-  kokoroBusy.value = true;
-  kokoroError.value = null;
-  try {
-    kokoroStatus.value = await window.faceplate.kokoro.stop();
-  } catch (err) {
-    kokoroError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    kokoroBusy.value = false;
-  }
-}
-
-watch(ttsEngine, (engine) => {
-  if (engine === 'kokoro') {
-    void refreshKokoro();
-    if (!kokoroPollTimer) kokoroPollTimer = setInterval(() => void refreshKokoro(), 3_000);
-  } else {
-    if (kokoroPollTimer) {
-      clearInterval(kokoroPollTimer);
-      kokoroPollTimer = null;
-    }
-  }
-}, { immediate: true });
-
-onBeforeUnmount(() => {
-  if (kokoroPollTimer) {
-    clearInterval(kokoroPollTimer);
-    kokoroPollTimer = null;
-  }
-});
-
 // Auto-derive model id from the voice id. The model is just a backend tag —
-// for Piper it's always `piper:<voice>`. Users almost never need to change
-// it; the Advanced section still lets them if they're swapping backends.
+// for Kokoro it's `kokoro:<voice>`. Users almost never need to change it;
+// the Advanced section still lets them if they're swapping backends.
+// Legacy 'piper:<voice>' values are migrated forward on the next voice change.
 watch(ttsVoice, (next, prev) => {
   if (!next) return;
-  const expected = `piper:${next}`;
-  if (ttsModel.value !== expected && (!ttsModel.value || ttsModel.value.startsWith('piper:'))) {
+  const expected = `kokoro:${next}`;
+  if (
+    ttsModel.value !== expected
+    && (!ttsModel.value
+      || ttsModel.value.startsWith('kokoro:')
+      || ttsModel.value.startsWith('piper:'))
+  ) {
     ttsModel.value = expected;
   }
   // Warm up the new voice in the sidecar so the first real synthesize call
@@ -403,7 +253,7 @@ async function warmUpVoice(voice: string): Promise<void> {
       body: JSON.stringify({
         input: '.',
         voice,
-        model: `piper:${voice}`,
+        model: `kokoro:${voice}`,
         response_format: 'mp3',
         stream: false,
       }),
@@ -423,7 +273,6 @@ const asrLang = useSetting('speech.asr.language');
 
 const showToken = ref(false);
 const status = ref<SidecarStatus | null>(null);
-const lifecycleBusy = ref<'start' | 'stop' | 'restart' | null>(null);
 const $q = useQuasar();
 
 interface OptionRow { label: string; value: string }
@@ -536,28 +385,6 @@ async function refreshStatus(): Promise<void> {
   status.value = await fp.sidecar.status();
 }
 
-async function lifecycle(action: 'start' | 'stop' | 'restart'): Promise<void> {
-  const fp = window.faceplate;
-  if (!fp) return;
-  lifecycleBusy.value = action;
-  try {
-    if (action === 'start') {
-      await fp.sidecar.start();
-    } else if (action === 'stop') {
-      await fp.sidecar.stop();
-    } else {
-      await fp.sidecar.stop();
-      await fp.sidecar.start();
-    }
-    await refreshStatus();
-    $q.notify({ type: 'positive', message: `sidecar ${action}ed`, timeout: 3000 });
-  } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof Error ? err.message : String(err), timeout: 6000 });
-  } finally {
-    lifecycleBusy.value = null;
-  }
-}
-
 onMounted(() => {
   void refreshStatus();
   void refreshDiscovery();
@@ -590,8 +417,4 @@ h3 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; color: #555; text-tr
 .muted { color: #666; margin-bottom: 16px; }
 .card { margin-bottom: 16px; border-radius: 10px; }
 
-.kokoro-lifecycle { display: flex; flex-direction: column; gap: 4px; }
-.kokoro-status-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.kokoro-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.warn { background: rgba(245, 158, 11, 0.12); border-radius: 8px; }
 </style>

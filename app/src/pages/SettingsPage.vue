@@ -106,12 +106,6 @@ const tabs: TabDef[] = [
     load: () => import('../components/settings/SettingsAgentPush.vue'),
   },
   {
-    id: 'podman',
-    label: 'Container Engine',
-    icon: 'developer_board',
-    load: () => import('../components/settings/SettingsPodman.vue'),
-  },
-  {
     id: 'privacy',
     label: 'Privacy',
     icon: 'privacy_tip',

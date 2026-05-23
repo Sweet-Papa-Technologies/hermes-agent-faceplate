@@ -39,7 +39,7 @@ async function fetchJson(
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<{ status: number; body: string }> {
   // Pick the right fetch:
-  //   - loopback / RFC1918 (litert-lm, sidecar via host port, hermes pointing
+  //   - loopback / RFC1918 (sidecar via host port, hermes pointing
   //     at a LAN LLM at 192.168.x): use Node's built-in fetch so we bypass
   //     Chromium's PAC/proxy config. Several macOS setups (Little Snitch,
   //     CleanMyMac, corp PAC) intercept private-network traffic and net.fetch
@@ -188,45 +188,11 @@ async function testParaphrase(): Promise<TestResult> {
   if (settings.paraphrase.model === 'disabled') {
     return { ok: false, latency_ms: 0, error: 'Paraphrase disabled in settings.' };
   }
-
-  // 'reuse_hermes_llm' tests the same endpoint as testLlm, since that's
-  // exactly what paraphrase will hit at runtime.
-  if (settings.paraphrase.model === 'reuse_hermes_llm') {
-    const r = await testLlm();
-    if (r.ok) return { ...r, detail: `paraphrase will use hermes LLM (${r.detail ?? ''})` };
-    return r;
-  }
-
-  // 'local_litert' — POSTs to host-native `litert-lm serve --api openai` at
-  // the URL set in settings.paraphrase.litert_lm_url (default
-  // http://127.0.0.1:7860/v1). litert-lm 0.11 only exposes the **Responses**
-  // API on this mode, not Chat Completions, so we POST to /responses with
-  // the Responses-shaped body.
-  const base = settings.paraphrase.litert_lm_url.replace(/\/+$/, '');
-  const url = `${base}/responses`;
-  const body = JSON.stringify({
-    model: 'gemma-4-E2B-it',
-    input: 'ping',
-    max_output_tokens: 1,
-  });
-  const { value, latency_ms } = await timed(() =>
-    fetchJson(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    }),
-  );
-  if (value.status >= 200 && value.status < 300) {
-    return { ok: true, latency_ms, detail: value.body.slice(0, 240) };
-  }
-  if (value.status === 0) {
-    return {
-      ok: false,
-      latency_ms,
-      error: `litert-lm not reachable at ${base}. Run \`make litert-up\` on the host first.`,
-    };
-  }
-  return { ok: false, latency_ms, error: `HTTP ${value.status}: ${value.body.slice(0, 240)}` };
+  // reuse_hermes_llm (the only remaining mode) tests the same endpoint as
+  // testLlm, since that's exactly what paraphrase hits at runtime.
+  const r = await testLlm();
+  if (r.ok) return { ...r, detail: `paraphrase will use hermes LLM (${r.detail ?? ''})` };
+  return r;
 }
 
 export function registerHermesTesterIpc(): void {

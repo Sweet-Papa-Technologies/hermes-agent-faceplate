@@ -46,22 +46,19 @@ export const HermesSettings = z.object({
 
 // Paraphrase model routing.
 //
-//   local_litert     → POST to host-native `litert-lm serve` (default).
-//                       URL is paraphrase.litert_lm_url, default
-//                       http://127.0.0.1:7860/v1.
-//                       Started outside the Faceplate via `make litert-up`.
 //   reuse_hermes_llm → POST direct to the underlying LLM provider hermes is
 //                       configured with. Requires read access to local
 //                       ~/.hermes/ to pick up provider/base_url/api_key.
 //                       Bypasses hermes-agent's /v1/chat/completions because
 //                       that runs the agent loop (would corrupt session memory).
 //   disabled         → never paraphrase; speak the full text.
-const ParaphraseModelEnum = z.enum(['local_litert', 'reuse_hermes_llm', 'disabled']);
+const ParaphraseModelEnum = z.enum(['reuse_hermes_llm', 'disabled']);
 
-// Backward-compat: existing settings.yaml files may carry the legacy
-// 'sidecar_fallback' value. Map it to 'local_litert' on read.
+// Backward-compat: older settings.yaml files may carry retired values
+// ('local_litert', 'sidecar_fallback') from when an on-device paraphrase
+// model was offered. Map any of them to 'reuse_hermes_llm' on read.
 const paraphraseModelInput = z.preprocess(
-  (v) => (v === 'sidecar_fallback' ? 'local_litert' : v),
+  (v) => (v === 'sidecar_fallback' || v === 'local_litert' ? 'reuse_hermes_llm' : v),
   ParaphraseModelEnum,
 );
 
@@ -93,22 +90,22 @@ export const ParaphraseSettings = z.object({
   trigger_chars: z.number().int().nonnegative().default(140),
   target_words: z.number().int().positive().default(15),
   model: paraphraseModelInput.default('reuse_hermes_llm'),
-  /** Endpoint the local_litert mode posts to. Defaults to the litert-lm
-   *  serve port set by scripts/start-litert.sh. */
-  litert_lm_url: z.string().url().default('http://127.0.0.1:7860/v1'),
   system_prompt: z.string().default(DEFAULT_PARAPHRASE_PROMPT),
 });
 
 export const TtsSettings = z.object({
-  /** Which TTS engine to call. 'piper' keeps the existing bundled-sidecar
-   * path (model + voice fields below). 'kokoro' routes to a separate
-   * kokoro-fastapi instance (default localhost:8880) using
-   * kokoro_voice + 'kokoro' as the model id. Both engines speak the same
-   * OpenAI-compatible /v1/audio/speech wire format, so the renderer's
-   * MSE streaming pipeline is unchanged. */
-  engine: z.enum(['piper', 'kokoro']).default('piper'),
-  model: z.string().default('piper:en_US-amy-medium'),
-  voice: z.string().default('en_US-amy-medium'),
+  /** TTS engine. Kokoro is the only backend the bundled sidecar ships
+   * (M3.5 swap — Piper retired). Stored 'piper' values from older
+   * settings.yaml files are silently migrated to 'kokoro' on read so
+   * upgrades don't trip a parse error. The `kokoro_url` / `kokoro_voice`
+   * fields below are kept for the "bring your own external Kokoro server
+   * at a different URL" path; M4 will fold them into the main sidecar
+   * URL/voice fields. */
+  engine: z
+    .preprocess((v) => (v === 'piper' ? 'kokoro' : v), z.enum(['kokoro']))
+    .default('kokoro'),
+  model: z.string().default('kokoro:af_bella'),
+  voice: z.string().default('af_bella'),
   rate: z.number().positive().default(1.0),
   // Addendum #1: pinned to MP3 for v1 (MSE).
   format: z.enum(['mp3', 'opus', 'wav', 'aac']).default('mp3'),
@@ -285,24 +282,8 @@ export const WizardState = z.object({
 });
 export type WizardState = z.infer<typeof WizardState>;
 
-export const InfraSettings = z.object({
-  /**
-   * Container engine for the Hermes Agent + sidecar containers.
-   *  - 'auto'   : resolve at startup — Podman if installed (recommended),
-   *               else an available Docker, without yanking a running
-   *               Docker-managed Hermes. Once resolved it's persisted as
-   *               'podman' or 'docker'; pick 'auto' again to re-resolve.
-   *  - 'podman' : always Podman (the app can install/manage it).
-   *  - 'docker' : always Docker (for users who already use it).
-   * Overridden by the FACEPLATE_CONTAINER_ENGINE env var when set.
-   */
-  container_engine: z.enum(['auto', 'docker', 'podman']).default('auto'),
-});
-export type InfraSettings = z.infer<typeof InfraSettings>;
-
 export const FaceplateSettings = z.object({
   schema_version: z.literal(1).default(1),
-  infra: InfraSettings.default({}),
   hermes: HermesSettings.default({}),
   paraphrase: ParaphraseSettings.default({}),
   speech: SpeechSettings.default({}),

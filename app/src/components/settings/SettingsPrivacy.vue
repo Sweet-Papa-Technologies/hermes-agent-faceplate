@@ -88,13 +88,10 @@ const egress = computed<EgressRow[]>(() => {
   const localLlmUrl = discovery.discovery?.local_config?.llm.base_url;
   const localReadable = discovery.discovery?.local_config_readable ?? false;
 
-  // Paraphrase routing:
-  //   'reuse_hermes_llm' AND local config readable → direct to user's LLM
-  //   otherwise → host-native litert-lm (default 127.0.0.1:7860)
+  // Paraphrase routing: reuse_hermes_llm + readable local config → direct to
+  // the user's underlying LLM. Otherwise paraphrase is skipped (no egress).
   const wantsBypass = s.paraphrase.model === 'reuse_hermes_llm';
   const bypassActive = wantsBypass && localReadable && Boolean(localLlmUrl);
-  const paraphraseEndpoint = bypassActive ? localLlmUrl! : s.paraphrase.litert_lm_url;
-  const paraphraseLocal = isLocalUrl(paraphraseEndpoint);
 
   return [
     {
@@ -113,10 +110,12 @@ const egress = computed<EgressRow[]>(() => {
     },
     {
       id: 'paraphrase',
-      label: bypassActive ? 'Paraphrase (direct to hermes\' LLM)' : 'Paraphrase (host-native litert-lm)',
+      label: bypassActive
+        ? "Paraphrase (direct to hermes' LLM)"
+        : 'Paraphrase (skipped — LLM not reachable directly)',
       when: `When response > ${s.paraphrase.trigger_chars} chars`,
-      endpoint: paraphraseEndpoint,
-      local: paraphraseLocal,
+      endpoint: bypassActive ? localLlmUrl! : '(none — full text spoken locally)',
+      local: bypassActive ? isLocalUrl(localLlmUrl!) : true,
     },
     {
       id: 'sidecar',

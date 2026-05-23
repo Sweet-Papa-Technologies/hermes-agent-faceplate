@@ -145,7 +145,7 @@
           </div>
         </div>
         <p class="muted q-mt-md">
-          After install, restart Hermes so the plugin loader picks up the new folder. If we found a running container, we'll offer to restart it for you. Test with a cron job that has <code>deliver: faceplate</code> — see <code>hermes-plugin/README.md</code> for an example.
+          After install, restart your Hermes gateway so the plugin loader picks up the new folder. Running Hermes on another machine? Run <code>setup/hermes-faceplate-plugin.sh</code> on that host instead. Test with a cron job that has <code>deliver: faceplate</code> — see <code>hermes-plugin/README.md</code> for an example.
         </p>
       </q-card-section>
     </q-card>
@@ -161,7 +161,6 @@ import type {
   AgentPushStatus,
   AgentPushInstallPreview,
   AgentPushInstallResult,
-  HermesContainerCandidate,
 } from '../../../src-electron/preload-api';
 
 const enabled = useSetting('agent_push.enabled');
@@ -220,11 +219,10 @@ function formatRel(ts: number): string {
 
 // ─── one-click install flow ──────────────────────────────────────────
 //
-// Three-step UX:
+// Two-step UX:
 //   1. Preview — read-only inspection, shown in a dialog.
 //   2. Install — copy + .env append; runs only after user clicks Install.
-//   3. Restart — separate dialog naming the detected container, so the user
-//      explicitly approves before we touch their Hermes process.
+// The user then restarts their Hermes gateway themselves.
 
 function summarisePreview(p: AgentPushInstallPreview): string {
   const lines: string[] = [];
@@ -239,17 +237,8 @@ function summarisePreview(p: AgentPushInstallPreview): string {
     else if (a.key === 'FACEPLATE_API_KEY') lines.push(`  ${a.key}: will generate a new random secret`);
     else lines.push(`  ${a.key}: will set to "${a.value}"`);
   }
-  if (p.hermes_container) {
-    lines.push('');
-    lines.push(`Detected Hermes container: ${p.hermes_container.name} (${p.hermes_container.state}, image ${p.hermes_container.image})`);
-    if (p.hermes_container.ambiguous) {
-      lines.push('  Note: multiple candidates matched — verify the name is correct.');
-    }
-    lines.push("After install, you'll be asked whether to restart it.");
-  } else {
-    lines.push('');
-    lines.push("No Hermes Docker container auto-detected — you'll need to restart it manually after install.");
-  }
+  lines.push('');
+  lines.push('After install, restart your Hermes gateway so the plugin loader picks up the new folder.');
   return lines.join('\n');
 }
 
@@ -278,11 +267,11 @@ async function onInstallClick(): Promise<void> {
     ok: { label: 'Install', noCaps: true, color: 'primary' },
     persistent: true,
   })
-    .onOk(() => { void doInstall(preview.hermes_container); })
+    .onOk(() => { void doInstall(); })
     .onCancel(() => { installing.value = false; });
 }
 
-async function doInstall(detected: HermesContainerCandidate | null): Promise<void> {
+async function doInstall(): Promise<void> {
   const fp = window.faceplate;
   if (!fp) { installing.value = false; return; }
   try {
@@ -294,47 +283,15 @@ async function doInstall(detected: HermesContainerCandidate | null): Promise<voi
     }
     $q.notify({
       type: 'positive',
-      message: 'Plugin installed. Hermes needs to restart to load it.',
-      timeout: 4000,
+      message: 'Plugin installed. Restart your Hermes gateway to load it.',
+      timeout: 5000,
     });
     // Settings patch from main already flipped `enabled` on; refresh status
     // so the connection chip starts polling.
     void refresh();
     startPolling();
-    const container = result.hermes_container ?? detected;
-    if (container) askRestart(container);
   } finally {
     installing.value = false;
-  }
-}
-
-function askRestart(container: HermesContainerCandidate): void {
-  const note = container.ambiguous
-    ? '\n\nNote: multiple containers matched our heuristic — double-check this name is the right one before restarting.'
-    : '';
-  $q.dialog({
-    title: 'Restart Hermes container?',
-    message:
-      `About to run:\n\n  docker restart ${container.name}\n\nImage: ${container.image}\nState: ${container.state}${note}`,
-    style: 'white-space: pre-wrap; font: 12px/1.4 \"JetBrains Mono\", ui-monospace, monospace; max-width: 640px;',
-    cancel: { label: 'Skip', flat: true, noCaps: true },
-    ok: { label: 'Restart', noCaps: true, color: 'primary' },
-    persistent: true,
-  }).onOk(() => { void doRestart(container.name); });
-}
-
-async function doRestart(name: string): Promise<void> {
-  const fp = window.faceplate;
-  if (!fp) return;
-  const r = await fp.agentPush.restartHermes(name);
-  if (r.ok) {
-    $q.notify({
-      type: 'positive',
-      message: `Restarted ${r.container}. Pings should arrive within a few seconds.`,
-      timeout: 5000,
-    });
-  } else {
-    $q.notify({ type: 'negative', message: r.error ?? 'Restart failed.', timeout: 8000 });
   }
 }
 

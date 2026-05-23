@@ -1,209 +1,89 @@
-"""GET /voices, GET /v1/models — discovery; POST /v1/voices/download — fetch."""
+"""GET /voices, GET /v1/models — Kokoro voice listings.
+
+Kokoro bundles every voice into a single voices-v1.0.bin file, so there's
+nothing to install on a per-voice basis: every voice in KNOWN_VOICES is
+reported as installed once the sidecar is set up. The legacy
+/v1/voices/download endpoint stays as a no-op for back-compat with older
+Faceplate builds that still poke at it.
+"""
 from __future__ import annotations
 
 import logging
-import re
-from pathlib import Path
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..auth import require_bearer
-from ..config import get_config
+from ..backends.kokoro_tts import DEFAULT_VOICE, KNOWN_VOICES
 
 
 _log = logging.getLogger("faceplate_sidecar.voices")
 
 router = APIRouter()
 
-VOICES_DIR = Path("/voices")
-HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
-# Hand-curated subset of rhasspy/piper-voices that's known to be reliable
-# and small enough to download in seconds. The Settings UI surfaces these
-# as one-click installs; advanced users can still POST /v1/voices/download
-# with any voice id from the upstream repo.
-KNOWN_VOICES = [
-    {"id": "en_US-amy-medium",        "language": "en-US", "speaker": "amy",        "quality": "medium", "size_mb": 60,  "default": True},
-    {"id": "en_US-ryan-high",         "language": "en-US", "speaker": "ryan",       "quality": "high",   "size_mb": 109},
-    {"id": "en_US-libritts_r-medium", "language": "en-US", "speaker": "libritts_r", "quality": "medium", "size_mb": 75},
-    {"id": "en_US-lessac-high",       "language": "en-US", "speaker": "lessac",     "quality": "high",   "size_mb": 109},
-    {"id": "en_US-hfc_female-medium", "language": "en-US", "speaker": "hfc_female", "quality": "medium", "size_mb": 60},
-    {"id": "en_US-hfc_male-medium",   "language": "en-US", "speaker": "hfc_male",   "quality": "medium", "size_mb": 60},
-    {"id": "en_GB-alan-medium",       "language": "en-GB", "speaker": "alan",       "quality": "medium", "size_mb": 60},
-    {"id": "en_GB-northern_english_male-medium", "language": "en-GB", "speaker": "northern_english_male", "quality": "medium", "size_mb": 60},
-    {"id": "es_ES-davefx-medium",     "language": "es-ES", "speaker": "davefx",     "quality": "medium", "size_mb": 60},
-    {"id": "fr_FR-siwis-medium",      "language": "fr-FR", "speaker": "siwis",      "quality": "medium", "size_mb": 60},
-    {"id": "de_DE-thorsten-medium",   "language": "de-DE", "speaker": "thorsten",   "quality": "medium", "size_mb": 60},
-    {"id": "it_IT-paola-medium",      "language": "it-IT", "speaker": "paola",      "quality": "medium", "size_mb": 60},
-]
-
-
-class DownloadRequest(BaseModel):
-    voice: str = Field(
-        ...,
-        pattern=r"^[a-z]{2,4}_[A-Z]{2}-[a-z0-9_-]+-(low|medium|high|x_low)$",
-        description="Piper voice id, e.g. 'en_US-amy-medium'.",
+def _voice_meta(voice_id: str) -> dict[str, Any]:
+    # Lightweight metadata from the Kokoro voice-id naming convention
+    # (hexgrad/Kokoro-82M VOICES.md): first char = accent (a=American,
+    # b=British), second char = gender (f=female, m=male), then '_<name>'.
+    accent_char = voice_id[:1]
+    gender_char = voice_id[1:2]
+    accent = {"a": "American", "b": "British"}.get(accent_char, "")
+    gender = {"f": "female", "m": "male"}.get(gender_char, "")
+    speaker = voice_id.split("_", 1)[1] if "_" in voice_id else voice_id
+    language = (
+        "en-US" if accent == "American"
+        else "en-GB" if accent == "British"
+        else "en"
     )
-
-
-def _parse_voice_id(voice: str) -> tuple[str, str, str, str]:
-    """en_US-amy-medium → ('en', 'en_US', 'amy', 'medium')."""
-    m = re.fullmatch(r"([a-z]{2,4})_([A-Z]{2})-(.+)-(low|medium|high|x_low)", voice)
-    if not m:
-        raise ValueError(f"unrecognised piper voice id: {voice!r}")
-    lang, country, speaker, quality = m.groups()
-    locale = f"{lang}_{country}"
-    return lang, locale, speaker, quality
+    descriptor = f"{accent} {gender}".strip()
+    label = f"{voice_id} — {descriptor}" if descriptor else voice_id
+    return {
+        "id": voice_id,
+        "voice": voice_id,
+        "language": language,
+        "speaker": speaker,
+        "label": label,
+        "quality": "kokoro",
+        "size_mb": 0,           # voices are bundled, no per-voice download
+        "installed": True,
+        "default": voice_id == DEFAULT_VOICE,
+    }
 
 
 @router.get("/voices", dependencies=[Depends(require_bearer)])
 @router.get("/v1/voices", dependencies=[Depends(require_bearer)])
-def list_voices() -> dict[str, list[dict[str, Any]]]:
-    """Return every voice the sidecar can serve right now.
-
-    Two sources, deduped by `voice` (filename stem):
-
-      1. `cfg.tts_models` from config.yaml — explicit registrations.
-      2. Any `*.onnx` in /voices/ that has a matching `.onnx.json`.
-         Without this, voices the user installs at runtime via
-         POST /v1/voices/download never appear in the Settings dropdown.
-
-    Voices whose registered `voice_path` doesn't actually exist are still
-    returned with `exists: false` so the UI can flag them, but they're
-    pushed to the bottom of the list.
-    """
-    cfg = get_config()
-    seen_stems: set[str] = set()
-    voices: list[dict[str, Any]] = []
-
-    # 1) Registered models — preserve order from config.yaml.
-    for m in cfg.tts_models:
-        if not m.voice_path:
-            continue
-        path = Path(m.voice_path)
-        voices.append(
-            {
-                "id": m.name,
-                "voice": path.stem,
-                "backend": m.backend,
-                "device": m.device,
-                "exists": path.exists(),
-            }
-        )
-        seen_stems.add(path.stem)
-
-    # 2) Auto-discovered installs — anything in /voices/ not already covered.
-    if VOICES_DIR.exists():
-        for onnx in sorted(VOICES_DIR.glob("*.onnx")):
-            if onnx.stem in seen_stems:
-                continue
-            cfg_json = onnx.with_suffix(onnx.suffix + ".json")
-            if not cfg_json.exists():
-                continue
-            voices.append(
-                {
-                    "id": f"piper:{onnx.stem}",
-                    "voice": onnx.stem,
-                    "backend": "piper-onnx",
-                    "device": "cpu",
-                    "exists": True,
-                }
-            )
-            seen_stems.add(onnx.stem)
-
-    # Sort: existing files first, then anything broken so it's visible last.
-    voices.sort(key=lambda v: (not v["exists"], v["voice"]))
-    return {"data": voices}
+async def list_voices() -> dict[str, Any]:
+    return {"data": [_voice_meta(v) for v in KNOWN_VOICES]}
 
 
 @router.get("/v1/voices/catalog", dependencies=[Depends(require_bearer)])
-def voice_catalog() -> dict[str, Any]:
-    """Recommended Piper voices users can install with one click. The
-    `installed` flag reflects whether the .onnx + .onnx.json pair already
-    exist in the voices volume."""
-    out: list[dict[str, Any]] = []
-    for v in KNOWN_VOICES:
-        onnx = VOICES_DIR / f"{v['id']}.onnx"
-        cfg = VOICES_DIR / f"{v['id']}.onnx.json"
-        out.append({**v, "installed": onnx.exists() and cfg.exists()})
-    return {"data": out, "voices_dir": str(VOICES_DIR)}
+async def voices_catalog() -> dict[str, Any]:
+    """Same shape the Faceplate's Settings → Speech Sidecar voice catalog
+    consumes. All voices report installed=true because Kokoro bundles
+    every embedding inside voices-v1.0.bin."""
+    return {"data": [_voice_meta(v) for v in KNOWN_VOICES]}
+
+
+class _DownloadReq(BaseModel):
+    voice: str
 
 
 @router.post("/v1/voices/download", dependencies=[Depends(require_bearer)])
-async def download_voice(req: DownloadRequest) -> dict[str, Any]:
-    """Download a Piper voice (.onnx + .onnx.json) from
-    huggingface.co/rhasspy/piper-voices into /voices. Idempotent: if both
-    files already exist the call returns immediately."""
-    try:
-        lang, locale, speaker, quality = _parse_voice_id(req.voice)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    onnx = VOICES_DIR / f"{req.voice}.onnx"
-    cfg = VOICES_DIR / f"{req.voice}.onnx.json"
-    if onnx.exists() and cfg.exists():
-        return {"voice": req.voice, "status": "already_installed", "path": str(onnx)}
-
-    base = f"{HF_BASE}/{lang}/{locale}/{speaker}/{quality}"
-    VOICES_DIR.mkdir(parents=True, exist_ok=True)
-    _log.info("downloading piper voice %s from %s", req.voice, base)
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-        for src, dst in [
-            (f"{base}/{req.voice}.onnx", onnx),
-            (f"{base}/{req.voice}.onnx.json", cfg),
-        ]:
-            tmp = dst.with_suffix(dst.suffix + ".tmp")
-            try:
-                async with client.stream("GET", src, follow_redirects=True) as r:
-                    if r.status_code != 200:
-                        if tmp.exists():
-                            tmp.unlink()
-                        raise HTTPException(
-                            status_code=502,
-                            detail=f"upstream HTTP {r.status_code} for {src}",
-                        )
-                    with tmp.open("wb") as f:
-                        async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
-                            f.write(chunk)
-                tmp.replace(dst)
-            except httpx.HTTPError as e:
-                if tmp.exists():
-                    tmp.unlink()
-                raise HTTPException(status_code=502, detail=f"download failed: {e}")
-    _log.info("voice %s installed at %s", req.voice, onnx)
-    return {
-        "voice": req.voice,
-        "status": "downloaded",
-        "path": str(onnx),
-        "size_bytes": onnx.stat().st_size,
-    }
+async def download_voice(req: _DownloadReq) -> dict[str, Any]:
+    """Back-compat no-op for older Faceplate builds. Kokoro voices ship
+    bundled — there is no per-voice download. Known voices return 200 with
+    a `note`; unknowns return 404."""
+    if req.voice in KNOWN_VOICES:
+        return {"ok": True, "voice": req.voice, "note": "bundled with Kokoro — already installed"}
+    raise HTTPException(404, f"unknown voice {req.voice!r}; see /v1/voices for the list")
 
 
 @router.get("/v1/models", dependencies=[Depends(require_bearer)])
-def list_models() -> dict[str, Any]:
-    """OpenAI-shaped /v1/models. Same auto-discover logic as /v1/voices so
-    the Settings dropdown picks up runtime-installed voices."""
-    cfg = get_config()
-    items: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for m in cfg.tts_models:
-        items.append({"id": m.name, "object": "model", "owned_by": "faceplate", "kind": "tts"})
-        seen_ids.add(m.name)
-    for m in cfg.asr_models:
-        items.append({"id": m.name, "object": "model", "owned_by": "faceplate", "kind": "asr"})
-        seen_ids.add(m.name)
-    if VOICES_DIR.exists():
-        for onnx in sorted(VOICES_DIR.glob("*.onnx")):
-            cfg_json = onnx.with_suffix(onnx.suffix + ".json")
-            if not cfg_json.exists():
-                continue
-            mid = f"piper:{onnx.stem}"
-            if mid in seen_ids:
-                continue
-            items.append({"id": mid, "object": "model", "owned_by": "faceplate", "kind": "tts"})
-            seen_ids.add(mid)
-    return {"object": "list", "data": items}
+async def list_models() -> dict[str, Any]:
+    """OpenAI-shaped /v1/models. One TTS entry per Kokoro voice plus the
+    default ASR — the Faceplate's Settings UI filters by the `kind` field."""
+    tts = [{"id": f"kokoro:{v}", "object": "model", "kind": "tts"} for v in KNOWN_VOICES]
+    asr = [{"id": "faster-whisper-small.en", "object": "model", "kind": "asr"}]
+    return {"object": "list", "data": tts + asr}

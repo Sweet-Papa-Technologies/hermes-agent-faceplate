@@ -39,9 +39,12 @@ cron_deliver_env_var: FACEPLATE_HOME_CHANNEL
 # uses this to gate the adapter — it only spins up when all required vars
 # have non-empty values. FACEPLATE_API_KEY is required (we won't accept
 # unauthenticated connections); FACEPLATE_HOME_CHANNEL gives cron a
-# default chat_id; FACEPLATE_PORT is optional (defaults to 8643).
+# default chat_id; FACEPLATE_PORT is optional (defaults to 8643);
+# FACEPLATE_BIND is the listen interface (defaults to 127.0.0.1 — set to a
+# reachable address when the Faceplate runs on a different machine).
 required_env:
   - FACEPLATE_API_KEY
 optional_env:
   - FACEPLATE_HOME_CHANNEL
   - FACEPLATE_PORT
+  - FACEPLATE_BIND

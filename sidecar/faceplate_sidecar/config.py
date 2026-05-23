@@ -25,6 +25,12 @@ import yaml
 DEFAULT_CONFIG_PATH = Path("/etc/faceplate-sidecar/config.yaml")
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
+# Filesystem location for Piper voices. Container images keep voices on a
+# volume at /voices; a native (uv-venv) run overrides this via env to a
+# host-writable dir. The default keeps container behaviour byte-identical —
+# FACEPLATE_VOICES_DIR is simply unset inside the image.
+VOICES_DIR = Path(os.environ.get("FACEPLATE_VOICES_DIR") or "/voices")
+
 
 def _expand_env(value: Any) -> Any:
     """Recursively replace ${VAR} substitutions in YAML string nodes."""
@@ -75,7 +81,7 @@ class Config:
     build: str = "cpu"
     auth: AuthConfig = field(default_factory=AuthConfig)
     asr_default: str = "faster-whisper-small.en"
-    tts_default: str = "piper:en_US-amy-medium"
+    tts_default: str = "kokoro:af_bella"
     asr_models: list[AsrModelEntry] = field(default_factory=list)
     tts_models: list[TtsModelEntry] = field(default_factory=list)
     wake: WakeConfig = field(default_factory=WakeConfig)
@@ -116,7 +122,7 @@ def load_config(path: Path | None = None) -> Config:
     tts_models = [
         TtsModelEntry(
             name=m["name"],
-            backend=m.get("backend", "piper-onnx"),
+            backend=m.get("backend", "kokoro"),
             voice_path=m.get("voice_path"),
             device=m.get("device", "cpu"),
         )
@@ -153,5 +159,9 @@ _singleton: Config | None = None
 def get_config() -> Config:
     global _singleton
     if _singleton is None:
-        _singleton = load_config()
+        # FACEPLATE_SIDECAR_CONFIG overrides the default /etc path for a
+        # native run; an absent file is fine — load_config falls back to
+        # the built-in defaults.
+        override = os.environ.get("FACEPLATE_SIDECAR_CONFIG")
+        _singleton = load_config(Path(override) if override else None)
     return _singleton

@@ -6,11 +6,10 @@ on `127.0.0.1:8080`.
 
 ## Image variants
 
-| Tag | Size (target) | LLM runtime | Default ASR | Default TTS |
-|-----|---------------|-------------|-------------|-------------|
-| `:cpu` (default) | ~4 GB | LiteRT-LM CPU + Gemma 4 E2B | faster-whisper int8 | Piper |
-| `:cpu-slim` | ~1.4 GB | none — paraphrase falls back to hermes' LLM only | faster-whisper int8 | Piper |
-| `:cuda` | ~7 GB | LiteRT-LM GPU + Gemma 4 E2B | faster-whisper fp16 | Kokoro / Piper |
+| Tag | Size (target) | Default ASR | Default TTS |
+|-----|---------------|-------------|-------------|
+| `:cpu` (default) | ~1.5 GB | faster-whisper int8 | Kokoro-82M (kokoro-onnx) |
+| `:cuda` | ~5 GB | faster-whisper fp16 | Kokoro-82M (kokoro-onnx) |
 
 ## Quick start
 
@@ -37,7 +36,7 @@ subsequent runs cache hit.
 | `WS`   | `/wake` | Bidirectional 16 kHz Int16 PCM in, JSON `{type, model, score, ts}` out. Off until `wake.enabled=true`. |
 | `POST` | `/v1/chat/completions` | Reverse-proxied to LiteRT-LM (Gemma 4 E2B). 501 on `:cpu-slim`. |
 | `GET`  | `/v1/models` | OpenAI list-models. |
-| `GET`  | `/voices` | Installed Piper voices. |
+| `GET`  | `/voices` | Kokoro voice catalog (all voices ship bundled). |
 | `GET`  | `/health`, `/v1/health` | `{status, build, gpu, models, ram_mb, version}`. |
 
 ## Auth
@@ -56,8 +55,8 @@ its own settings, and starts the container with `-e FACEPLATE_API_KEY=…`.
 
 | Path | Purpose |
 |------|---------|
-| `/models` | HF + LiteRT-LM model cache. |
-| `/voices` | Piper `.onnx` voices. |
+| `/models` | faster-whisper HF model cache. |
+| `/voices` | Kokoro model + voices files (`kokoro-v1.0.onnx`, `voices-v1.0.bin`). |
 | `/wakewords` | openWakeWord `.onnx` files. |
 | `/etc/faceplate-sidecar/config.yaml` | Runtime config. |
 

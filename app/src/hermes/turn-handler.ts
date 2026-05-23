@@ -280,7 +280,7 @@ async function runTurn(userText: string): Promise<void> {
   }
 
   // Same guard after the paraphrase await — barge-in may have happened
-  // while we were waiting on litert-lm.
+  // while we were waiting on the paraphrase LLM.
   if (active !== handle) return;
 
   eventBus.emit({

@@ -87,10 +87,9 @@
         </p>
         <q-option-group v-model="ttsEngineChoice" :options="ttsEngineOptions" type="radio" />
 
-        <!-- Bundled Piper sidecar lifecycle. Same "Install + start" UX as
-             the Kokoro card — one button kicks off the docker-compose
-             pull + up; we poll for readiness and surface the status. -->
-        <q-card v-if="ttsEngineChoice === 'piper'" flat bordered class="q-mt-md wizard-action-card">
+        <!-- The Faceplate connects to a speech sidecar by URL — it doesn't
+             run one. Show reachability; point the user at the setup script. -->
+        <q-card flat bordered class="q-mt-md wizard-action-card">
           <q-card-section>
             <div class="row items-center q-gutter-sm">
               <q-chip
@@ -104,93 +103,15 @@
               <q-chip v-if="sidecarStatus?.url" outline dense>{{ sidecarStatus.url }}</q-chip>
             </div>
             <p class="muted q-mt-sm" style="margin-bottom: 0;">
-              Image: <strong>cpu-slim</strong> (recommended for v1 — Hermes handles paraphrase, no on-device LLM).
+              Set up a sidecar with <code>setup/speech-sidecar.sh</code>, or bring your own
+              {{ ttsEngineChoice === 'kokoro' ? 'Kokoro' : 'OpenAI-compatible' }} endpoint —
+              then enter its URL and token in Settings → Speech Sidecar. You can finish the
+              wizard now and do this after; the Faceplate works type-only without voice.
             </p>
           </q-card-section>
           <q-card-actions>
-            <q-btn
-              v-if="!sidecarStatus?.up"
-              color="primary"
-              no-caps
-              icon="rocket_launch"
-              :label="sidecarBusy ? 'Starting (first run pulls the image, ~2-3 min)…' : 'Start the speech sidecar'"
-              :loading="sidecarBusy"
-              @click="startSidecar"
-            />
-            <q-btn
-              v-else
-              outline
-              no-caps
-              icon="stop"
-              :label="sidecarBusy ? 'Stopping…' : 'Stop the speech sidecar'"
-              :loading="sidecarBusy"
-              @click="stopSidecar"
-            />
-            <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="refreshSidecar" />
+            <q-btn flat dense no-caps icon="refresh" label="Refresh status" @click="refreshSidecar" />
           </q-card-actions>
-          <q-banner v-if="sidecarError" class="warn" dense>
-            <template #avatar><q-icon name="warning" color="warning" /></template>
-            {{ sidecarError }}
-          </q-banner>
-        </q-card>
-
-        <!-- Kokoro lifecycle card — exact same surface as Settings →
-             Speech Sidecar → Engine: Kokoro. One click does pull + run. -->
-        <q-card v-if="ttsEngineChoice === 'kokoro'" flat bordered class="q-mt-md wizard-action-card">
-          <q-card-section>
-            <div class="row items-center q-gutter-sm">
-              <q-chip
-                :color="kokoroChip.color"
-                :icon="kokoroChip.icon"
-                text-color="white"
-                dense
-              >
-                {{ kokoroChip.label }}
-              </q-chip>
-              <q-chip v-if="kokoroStatus?.base_url" outline dense>{{ kokoroStatus.base_url }}</q-chip>
-            </div>
-            <p class="muted q-mt-sm" style="margin-bottom: 0;">
-              ~340 MB Docker image. Default voice <code>af_bella</code>; switchable later.
-            </p>
-          </q-card-section>
-          <q-card-actions>
-            <q-btn
-              v-if="kokoroPrimary === 'install'"
-              color="primary"
-              no-caps
-              icon="rocket_launch"
-              :label="kokoroBusy ? 'Pulling image + starting (first run takes a few minutes)…' : 'Install + start Kokoro'"
-              :loading="kokoroBusy"
-              @click="ensureKokoro"
-            />
-            <q-btn
-              v-else-if="kokoroPrimary === 'start'"
-              color="primary"
-              no-caps
-              icon="play_arrow"
-              :label="kokoroBusy ? 'Starting…' : 'Start Kokoro'"
-              :loading="kokoroBusy"
-              @click="ensureKokoro"
-            />
-            <q-btn
-              v-else-if="kokoroPrimary === 'stop'"
-              outline
-              no-caps
-              icon="stop"
-              :label="kokoroBusy ? 'Stopping…' : 'Stop Kokoro'"
-              :loading="kokoroBusy"
-              @click="stopKokoroBtn"
-            />
-            <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="refreshKokoro" />
-          </q-card-actions>
-          <q-banner v-if="kokoroError" class="warn" dense>
-            <template #avatar><q-icon name="warning" color="warning" /></template>
-            {{ kokoroError }}
-          </q-banner>
-          <q-banner v-if="kokoroStatus && !kokoroStatus.docker_available" class="warn" dense>
-            <template #avatar><q-icon name="warning" color="warning" /></template>
-            Docker isn't installed (or isn't on PATH). Install Docker Desktop, then come back here.
-          </q-banner>
         </q-card>
 
         <q-stepper-navigation>
@@ -253,7 +174,7 @@ import TestConnectionButton from '../components/settings/TestConnectionButton.vu
 import { useSetting } from '../composables/use-setting';
 import { useSettingsStore } from '../stores/settings';
 import { useDiscoveryStore } from '../stores/discovery';
-import type { KokoroStatus, SidecarStatus } from '../../src-electron/preload-api';
+import type { SidecarStatus } from '../../src-electron/preload-api';
 
 const $q = useQuasar();
 
@@ -304,26 +225,22 @@ const imageOptions = [
 ];
 
 const ttsEngineOptions = [
-  { label: 'Piper (bundled, fast — works out of the box)', value: 'piper' },
-  { label: 'Kokoro (separate sidecar — much higher voice quality, ~340 MB)', value: 'kokoro' },
+  { label: 'Kokoro-82M (bundled — high-quality, ~352 MB first-run download)', value: 'kokoro' },
 ];
 
-// ─── speech sidecar (Piper) lifecycle, in-wizard ────────────────────────
+// ─── speech sidecar status, in-wizard ───────────────────────────────────
 //
-// One-click "Start the speech sidecar" so the wizard doesn't ask the user
-// to drop into a terminal. Uses the same window.faceplate.sidecar.start
-// IPC that Settings → Speech Sidecar uses; first-run pulls the image
-// (~1.4 GB) so the button surfaces a spinner + permissive wait.
+// The Faceplate connects to a speech sidecar by URL; it doesn't run one.
+// The wizard just shows whether one is reachable and polls while the user
+// is on the speech step. `sidecar.status()` is a plain health probe.
 const sidecarStatus = ref<SidecarStatus | null>(null);
-const sidecarBusy = ref(false);
-const sidecarError = ref<string | null>(null);
 let sidecarPollTimer: ReturnType<typeof setInterval> | null = null;
 
 const sidecarChip = computed(() => {
   const s = sidecarStatus.value;
   if (!s) return { label: 'Checking…', icon: 'hourglass_top', color: 'grey-6' };
-  if (s.up) return { label: `Running · ${s.build ?? 'cpu-slim'}`, icon: 'check_circle', color: 'positive' };
-  return { label: 'Not running', icon: 'pause_circle', color: 'grey-6' };
+  if (s.up) return { label: `Reachable · ${s.build ?? 'cpu'}`, icon: 'check_circle', color: 'positive' };
+  return { label: 'Not reachable yet', icon: 'pause_circle', color: 'grey-6' };
 });
 
 async function refreshSidecar(): Promise<void> {
@@ -335,130 +252,20 @@ async function refreshSidecar(): Promise<void> {
   }
 }
 
-async function startSidecar(): Promise<void> {
-  if (!window.faceplate || sidecarBusy.value) return;
-  // Make sure the chosen image is persisted before we boot the container.
-  if (sidecarImage.value !== 'cpu-slim') sidecarImage.value = 'cpu-slim';
-  if (sidecarMode.value !== 'bundled') sidecarMode.value = 'bundled';
-  sidecarBusy.value = true;
-  sidecarError.value = null;
-  try {
-    await window.faceplate.sidecar.start();
-    $q.notify({ type: 'positive', message: 'Speech sidecar started.', timeout: 3000 });
-  } catch (err) {
-    sidecarError.value = err instanceof Error ? err.message : String(err);
-    $q.notify({ type: 'negative', message: sidecarError.value, timeout: 6000 });
-  } finally {
-    sidecarBusy.value = false;
-    void refreshSidecar();
-  }
-}
-
-async function stopSidecar(): Promise<void> {
-  if (!window.faceplate || sidecarBusy.value) return;
-  sidecarBusy.value = true;
-  sidecarError.value = null;
-  try {
-    await window.faceplate.sidecar.stop();
-  } catch (err) {
-    sidecarError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    sidecarBusy.value = false;
-    void refreshSidecar();
-  }
-}
-
-// ─── Kokoro lifecycle, in-wizard ────────────────────────────────────────
-//
-// Same UX as Settings → Speech Sidecar's Kokoro card. Polled every 3s
-// while the user is on this step and Kokoro is selected.
-const kokoroStatus = ref<KokoroStatus | null>(null);
-const kokoroBusy = ref(false);
-const kokoroError = ref<string | null>(null);
-let kokoroPollTimer: ReturnType<typeof setInterval> | null = null;
-
-const kokoroPrimary = computed<'install' | 'start' | 'stop' | 'none'>(() => {
-  const s = kokoroStatus.value;
-  if (!s) return 'none';
-  if (!s.docker_available) return 'none';
-  if (s.reachable && s.container_state === 'missing') return 'none';
-  if (s.container_state === 'missing') return 'install';
-  if (s.container_state === 'exited') return 'start';
-  return 'stop';
-});
-
-const kokoroChip = computed(() => {
-  const s = kokoroStatus.value;
-  if (!s) return { label: 'Checking…', icon: 'hourglass_top', color: 'grey-6' };
-  if (!s.docker_available) return { label: 'Docker not found', icon: 'block', color: 'grey-6' };
-  if (s.reachable) return { label: 'Reachable', icon: 'check_circle', color: 'positive' };
-  if (s.container_state === 'running') return { label: 'Container up, not yet ready', icon: 'sync', color: 'orange' };
-  if (s.container_state === 'exited') return { label: 'Container stopped', icon: 'pause_circle', color: 'grey-6' };
-  return { label: 'Not installed', icon: 'download', color: 'grey-6' };
-});
-
-async function refreshKokoro(): Promise<void> {
-  if (!window.faceplate) return;
-  try {
-    kokoroStatus.value = await window.faceplate.kokoro.status();
-  } catch (err) {
-    console.warn('[wizard] kokoro.status threw:', err);
-  }
-}
-
-async function ensureKokoro(): Promise<void> {
-  if (!window.faceplate || kokoroBusy.value) return;
-  kokoroBusy.value = true;
-  kokoroError.value = null;
-  try {
-    kokoroStatus.value = await window.faceplate.kokoro.ensure();
-    $q.notify({ type: 'positive', message: 'Kokoro is up and reachable.', timeout: 3000 });
-  } catch (err) {
-    kokoroError.value = err instanceof Error ? err.message : String(err);
-    $q.notify({ type: 'negative', message: kokoroError.value, timeout: 6000 });
-  } finally {
-    kokoroBusy.value = false;
-    void refreshKokoro();
-  }
-}
-
-async function stopKokoroBtn(): Promise<void> {
-  if (!window.faceplate || kokoroBusy.value) return;
-  kokoroBusy.value = true;
-  kokoroError.value = null;
-  try {
-    kokoroStatus.value = await window.faceplate.kokoro.stop();
-  } catch (err) {
-    kokoroError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    kokoroBusy.value = false;
-  }
-}
-
-// Watch the step + engine choice — only poll while the user is on step 2
-// (speech engine) AND the relevant card is visible. Stops the timers
-// when the user clicks Back or moves forward so we don't burn cycles
-// polling for a panel they're not looking at.
+// Poll the sidecar health probe while the user is on the speech step.
 watch(
-  () => [step.value, ttsEngineChoice.value] as const,
-  ([s, engine]) => {
+  () => step.value,
+  (s) => {
     if (sidecarPollTimer) { clearInterval(sidecarPollTimer); sidecarPollTimer = null; }
-    if (kokoroPollTimer)  { clearInterval(kokoroPollTimer);  kokoroPollTimer  = null; }
     if (s !== 2) return;
-    if (engine === 'piper') {
-      void refreshSidecar();
-      sidecarPollTimer = setInterval(() => void refreshSidecar(), 3_000);
-    } else if (engine === 'kokoro') {
-      void refreshKokoro();
-      kokoroPollTimer = setInterval(() => void refreshKokoro(), 3_000);
-    }
+    void refreshSidecar();
+    sidecarPollTimer = setInterval(() => void refreshSidecar(), 3_000);
   },
   { immediate: true },
 );
 
 onBeforeUnmount(() => {
   if (sidecarPollTimer) clearInterval(sidecarPollTimer);
-  if (kokoroPollTimer)  clearInterval(kokoroPollTimer);
 });
 
 const inputModeOptions = [
