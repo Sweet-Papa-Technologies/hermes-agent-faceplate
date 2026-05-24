@@ -27,15 +27,6 @@ export const HermesSettings = z.object({
   config_path: z.string().default('~/.hermes/config.yaml'),
   install_shell_hook: z.boolean().default(false),
   /**
-   * When true (default) the Faceplate auto-installs the `faceplate-canvas`
-   * skill into ~/.hermes/skills/ on every boot. The skill teaches Hermes
-   * the inline <artifact> tag protocol so visualizations render in the
-   * canvas window without each user having to hand-edit their prompt.
-   *
-   * Idempotent: missing → write; older version → upgrade; same/newer → leave.
-   */
-  install_canvas_skill: z.boolean().default(true),
-  /**
    * How many prior turns to send back as `conversation_history` on each
    * `/v1/runs` POST. Higher = more memory but more tokens + a higher chance
    * the model gets distracted iterating over old turns rather than focusing
@@ -94,29 +85,13 @@ export const ParaphraseSettings = z.object({
 });
 
 export const TtsSettings = z.object({
-  /** TTS engine. Kokoro is the only backend the bundled sidecar ships
-   * (M3.5 swap — Piper retired). Stored 'piper' values from older
-   * settings.yaml files are silently migrated to 'kokoro' on read so
-   * upgrades don't trip a parse error. The `kokoro_url` / `kokoro_voice`
-   * fields below are kept for the "bring your own external Kokoro server
-   * at a different URL" path; M4 will fold them into the main sidecar
-   * URL/voice fields. */
-  engine: z
-    .preprocess((v) => (v === 'piper' ? 'kokoro' : v), z.enum(['kokoro']))
-    .default('kokoro'),
+  /** OpenAI-style `model` id sent to the speech sidecar. Auto-derived from
+   * `voice` (kokoro:<voice>); rarely needs hand-editing. */
   model: z.string().default('kokoro:af_bella'),
+  /** Kokoro voice id (see VOICES.md in hexgrad/Kokoro-82M). `af_*` =
+   * American female, `am_*` = American male, `bf_*`/`bm_*` = British. */
   voice: z.string().default('af_bella'),
   rate: z.number().positive().default(1.0),
-  // Addendum #1: pinned to MP3 for v1 (MSE).
-  format: z.enum(['mp3', 'opus', 'wav', 'aac']).default('mp3'),
-  /** Base URL of the Kokoro FastAPI sidecar (or any OpenAI-compat server
-   * that exposes /v1/audio/speech with the Kokoro model). Used only when
-   * engine === 'kokoro'. */
-  kokoro_url: z.string().url().default('http://127.0.0.1:8880'),
-  /** Kokoro voice id (see VOICES.md in hexgrad/Kokoro-82M). 'af_*' = American
-   * female, 'am_*' = American male, etc. A-grade English voices are
-   * generally the best quality. */
-  kokoro_voice: z.string().default('af_bella'),
 });
 
 export const AsrSettings = z.object({
@@ -125,11 +100,13 @@ export const AsrSettings = z.object({
 });
 
 export const SpeechSettings = z.object({
-  sidecar_mode: z.enum(['bundled', 'external', 'disabled']).default('bundled'),
+  /** Master switch for the voice surface (TTS + ASR + wake-word). When
+   * false, the avatar is type-only — no audio in or out. */
+  enabled: z.boolean().default(true),
+  /** URL of the speech sidecar (set up with `setup/speech-sidecar.sh`,
+   * a Kokoro / OpenAI-compatible service you run yourself, or a remote one). */
   sidecar_url: z.string().url().default('http://127.0.0.1:8080'),
   sidecar_token: z.string().default(''),
-  // Addendum #4: cpu-slim is opt-out for users with no offline paraphrase need.
-  sidecar_image: z.enum(['cpu', 'cpu-slim', 'cuda']).default('cpu'),
   tts: TtsSettings.default({}),
   asr: AsrSettings.default({}),
 });

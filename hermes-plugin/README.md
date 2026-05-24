@@ -10,8 +10,36 @@ Hermes has no first-party `/v1/inbox` or push SSE on its API server (see `docs/v
 
 ## Install
 
+Three paths; pick whichever fits where Hermes runs.
+
+### A. In-app (local Hermes)
+
+In the Faceplate: **Settings → Notifications & Pings → Install plugin.** A
+preview dialog shows exactly what files will be touched; click *Install*,
+restart your Hermes gateway. Done. This is the easiest path when Hermes
+runs on the same machine as the Faceplate.
+
+### B. Standalone script (any Hermes you can SSH to)
+
+Run on the Hermes host, from a clone of the repo:
+
 ```sh
-# From this repo
+bash setup/hermes-faceplate-plugin.sh [--bind 0.0.0.0] [--port 8643]
+```
+
+Pass `--bind 0.0.0.0` (or a specific reachable address) when the Faceplate
+runs on a different machine. The script copies the plugin into
+`~/.hermes/plugins/faceplate/`, appends env vars to `~/.hermes/.env`
+(generating a key if absent, never clobbering), and prints the WebSocket
+URL + key to paste into the Faceplate.
+
+Restart Hermes when prompted. Then in the app: **Settings → Notifications
+& Pings → Enable pings** and paste both.
+
+### C. By hand (if you don't have the repo)
+
+```sh
+# Copy this directory to ~/.hermes/plugins/faceplate/
 cp -R hermes-plugin/faceplate ~/.hermes/plugins/faceplate
 
 # Add to ~/.hermes/.env (generate a strong random key for production)
@@ -19,13 +47,17 @@ cat >> ~/.hermes/.env <<'EOF'
 FACEPLATE_API_KEY=replace-me-with-a-random-secret
 FACEPLATE_HOME_CHANNEL=default
 FACEPLATE_PORT=8643
+# Optional — listen interface. 127.0.0.1 is the default; set 0.0.0.0 (or a
+# specific address) when the Faceplate runs on a different machine.
+# FACEPLATE_BIND=0.0.0.0
 EOF
 
 # Restart the Hermes gateway so the plugin loader picks up the new dir.
 docker restart hermes-personal   # or however you restart yours
 ```
 
-Then in the Faceplate: Settings → Notifications & Push → enable "Receive unprompted messages from Hermes", paste the same `FACEPLATE_API_KEY` value.
+Then in the Faceplate: **Settings → Notifications & Pings**, enable, and
+paste the matching URL + `FACEPLATE_API_KEY`.
 
 ## Verify
 

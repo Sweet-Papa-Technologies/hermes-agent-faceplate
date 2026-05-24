@@ -22,8 +22,6 @@ import type {
   CreateArtifactInput,
 } from '../src/stores/artifact-types';
 
-export type SidecarBuild = 'cpu' | 'cpu-slim' | 'cuda';
-
 export interface HermesCapabilities {
   /** Model id hermes advertises for itself (e.g. `hermes-agent` or a profile name). */
   model?: string;
@@ -188,8 +186,11 @@ export interface TestResult {
 
 export interface SidecarStatus {
   up: boolean;
-  build: SidecarBuild;
-  /** Configured sidecar base URL (shown as a chip in the wizard). */
+  /** Build tag the sidecar reports in /health (e.g. "cpu", "cuda", or
+   * whatever a native/external sidecar advertises). Empty string when
+   * unreachable. */
+  build: string;
+  /** Configured sidecar base URL (shown as a chip in the UI). */
   url: string;
   models?: Record<string, 'loaded' | 'idle' | 'error'>;
   ram_mb?: number;

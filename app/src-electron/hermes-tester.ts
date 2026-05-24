@@ -130,8 +130,8 @@ async function testLlm(): Promise<TestResult> {
 
 async function testTts(): Promise<TestResult> {
   const settings = getSettings();
-  if (settings.speech.sidecar_mode === 'disabled') {
-    return { ok: false, latency_ms: 0, error: 'Sidecar disabled.' };
+  if (!settings.speech.enabled) {
+    return { ok: false, latency_ms: 0, error: 'Voice is disabled in Settings → Voice.' };
   }
   // Lightweight: fetch /voices (or /v1/voices). Don't actually synthesise.
   const base = settings.speech.sidecar_url.replace(/\/+$/, '');
@@ -164,8 +164,8 @@ async function testTts(): Promise<TestResult> {
 
 async function testAsr(): Promise<TestResult> {
   const settings = getSettings();
-  if (settings.speech.sidecar_mode === 'disabled') {
-    return { ok: false, latency_ms: 0, error: 'Sidecar disabled.' };
+  if (!settings.speech.enabled) {
+    return { ok: false, latency_ms: 0, error: 'Voice is disabled in Settings → Voice.' };
   }
   const base = settings.speech.sidecar_url.replace(/\/+$/, '');
   const headers: Record<string, string> = {};

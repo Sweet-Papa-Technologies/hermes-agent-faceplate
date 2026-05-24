@@ -589,33 +589,24 @@ async function speakAndAnimate(
   agent.transition('speaking', 'tts.start');
 
   const speech = settings.settings.speech;
-  // Two ways to skip TTS: a permanent setting (`sidecar_mode: disabled`)
-  // and a transient toggle (`agent.muted`, controlled by the HUD's mute
-  // button). Both finalize the assistant turn immediately so it still
-  // lands in the conversation history without playing audio.
-  if (speech.sidecar_mode === 'disabled' || agent.muted) {
+  // Two ways to skip TTS: the permanent voice master switch (`speech.enabled`)
+  // and the transient HUD mute (`agent.muted`). Both finalize the assistant
+  // turn immediately so it still lands in conversation history without audio.
+  if (!speech.enabled || agent.muted) {
     convo.finalizeTurn();
     agent.transition('idle', agent.muted ? 'tts.muted' : 'tts.disabled');
     return;
   }
 
-  // Engine choice gates which sidecar URL + voice/model we hit. Both engines
-  // speak OpenAI-compatible /v1/audio/speech, so the rest of the pipeline
-  // (MSE, viseme analyser, sink-id) is engine-agnostic.
-  const useKokoro = speech.tts.engine === 'kokoro';
-  const ttsBaseUrl = useKokoro
-    ? `${speech.tts.kokoro_url.replace(/\/$/, '')}/v1`
-    : `${speech.sidecar_url.replace(/\/$/, '')}/v1`;
-  const ttsVoice = useKokoro ? speech.tts.kokoro_voice : speech.tts.voice;
-  // Kokoro-FastAPI's model id is just "kokoro" (or OpenAI aliases tts-1 /
-  // tts-1-hd). We pin to "kokoro" since that selects the bundled weights.
-  const ttsModel = useKokoro ? 'kokoro' : speech.tts.model;
-  // Kokoro sidecar is unauthenticated by default; only forward the token
-  // for the bundled Piper sidecar.
-  const ttsApiKey = useKokoro ? undefined : (speech.sidecar_token || undefined);
+  // Single Kokoro-backed sidecar (M3.5+). The pipeline downstream (MSE,
+  // viseme analyser, sink-id) is engine-agnostic.
+  const ttsBaseUrl = `${speech.sidecar_url.replace(/\/$/, '')}/v1`;
+  const ttsVoice = speech.tts.voice;
+  const ttsModel = speech.tts.model;
+  const ttsApiKey = speech.sidecar_token || undefined;
 
   const sid = ++speakCount;
-  console.log(`[turn] speakStream #${sid} START engine=${speech.tts.engine} voice="${ttsVoice}" model="${ttsModel}" len=${text.length} active===handle? ${active === handle}`);
+  console.log(`[turn] speakStream #${sid} START voice="${ttsVoice}" model="${ttsModel}" len=${text.length} active===handle? ${active === handle}`);
   let speak: SpeakHandle;
   try {
     const outputDeviceId = settings.settings.output.device_id;
@@ -628,7 +619,7 @@ async function speakAndAnimate(
         model: ttsModel,
         speed: speech.tts.rate,
       },
-      format: speech.tts.format,
+      format: 'mp3',
       signal: handle.abort.signal,
       ...(outputDeviceId ? { outputDeviceId } : {}),
       onAnalyser: (analyser) => {
@@ -639,8 +630,8 @@ async function speakAndAnimate(
           ts: Date.now(),
           payload: {
             voice: ttsVoice,
-            mime: mimeFor(speech.tts.format),
-            format: speech.tts.format,
+            mime: mimeFor('mp3'),
+            format: 'mp3',
           },
         });
       },

@@ -119,8 +119,8 @@ const egress = computed<EgressRow[]>(() => {
     },
     {
       id: 'sidecar',
-      label: `Sidecar (${s.speech.sidecar_image})`,
-      when: 'TTS / ASR / wake-word',
+      label: 'Speech sidecar',
+      when: s.speech.enabled ? 'TTS / ASR / wake-word' : 'disabled',
       endpoint: s.speech.sidecar_url,
       local: isLocalUrl(s.speech.sidecar_url),
     },

@@ -52,22 +52,16 @@ const tabs: TabDef[] = [
     load: () => import('../components/settings/SettingsConnection.vue'),
   },
   {
-    id: 'audio',
-    label: 'Audio I/O',
-    icon: 'graphic_eq',
-    load: () => import('../components/settings/SettingsAudio.vue'),
-  },
-  {
-    id: 'sidecar',
-    label: 'Speech Sidecar',
-    icon: 'memory',
-    load: () => import('../components/settings/SettingsSidecar.vue'),
-  },
-  {
     id: 'voice',
-    label: 'Voice Input',
-    icon: 'mic',
-    load: () => import('../components/settings/SettingsVoiceInput.vue'),
+    label: 'Voice',
+    icon: 'graphic_eq',
+    load: () => import('../components/settings/SettingsVoice.vue'),
+  },
+  {
+    id: 'avatar',
+    label: 'Avatar & Display',
+    icon: 'face',
+    load: () => import('../components/settings/SettingsAvatar.vue'),
   },
   {
     id: 'hotkeys',
@@ -76,34 +70,10 @@ const tabs: TabDef[] = [
     load: () => import('../components/settings/SettingsHotkeys.vue'),
   },
   {
-    id: 'avatar',
-    label: 'Avatar / Theme',
-    icon: 'face',
-    load: () => import('../components/settings/SettingsAvatar.vue'),
-  },
-  {
-    id: 'paraphrase',
-    label: 'Paraphrase',
-    icon: 'short_text',
-    load: () => import('../components/settings/SettingsParaphrase.vue'),
-  },
-  {
-    id: 'artifacts',
-    label: 'Canvas / Artifacts',
-    icon: 'auto_awesome',
-    load: () => import('../components/settings/SettingsArtifacts.vue'),
-  },
-  {
     id: 'notifications',
-    label: 'Notifications',
+    label: 'Notifications & Pings',
     icon: 'notifications_active',
     load: () => import('../components/settings/SettingsNotifications.vue'),
-  },
-  {
-    id: 'agent_push',
-    label: 'Hermes Pings',
-    icon: 'forward_to_inbox',
-    load: () => import('../components/settings/SettingsAgentPush.vue'),
   },
   {
     id: 'privacy',

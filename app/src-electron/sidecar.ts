@@ -19,22 +19,26 @@ export async function sidecarStatus(): Promise<SidecarStatus> {
   }
   try {
     const res = await net.fetch(url, { headers, signal: AbortSignal.timeout(2_000) });
-    if (!res.ok) return { up: false, build: settings.speech.sidecar_image, url: baseUrl };
+    if (!res.ok) return { up: false, build: '', url: baseUrl };
     const json = (await res.json()) as {
+      build?: string;
       models?: Record<string, 'loaded' | 'idle' | 'error'>;
       ram_mb?: number;
       version?: string;
     };
     return {
       up: true,
-      build: settings.speech.sidecar_image,
+      // /health includes the build tag the sidecar was packaged with
+      // (FACEPLATE_BUILD env, set by the container entrypoint or the
+      // native setup script). Default to "unknown" if absent.
+      build: json.build || 'unknown',
       url: baseUrl,
       ...(json.models ? { models: json.models } : {}),
       ...(json.ram_mb !== undefined ? { ram_mb: json.ram_mb } : {}),
       ...(json.version ? { version: json.version } : {}),
     };
   } catch {
-    return { up: false, build: settings.speech.sidecar_image, url: baseUrl };
+    return { up: false, build: '', url: baseUrl };
   }
 }
 

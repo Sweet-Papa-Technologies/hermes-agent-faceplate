@@ -231,16 +231,14 @@ changeable later in Settings — it does not need a wizard step.
 
 ## 12. Milestones
 
-| M | Scope |
-|---|---|
-| **M1** | This doc — review + sign-off. Decide the open questions in §13. |
-| **M2** | Cut the runtime layer: delete the §8 "Cut" files, unwire IPC, strip LiteRT from `paraphrase-bridge.ts`, shrink the Makefile. Typecheck green, app still launches against a manually-run Hermes + sidecar. |
-| **M3** | Author the `setup/` scripts (§5). Make the plugin bind-address + hook callback-URL configurable for the remote case. |
-| **M4** | Streamline Settings (13→6) and onboarding (6→3). |
-| **M5** | Rewrite QUICKSTART / SETUP / READMEs to the thin-client model; reconcile to one install path; archive superseded docs. |
-
-M2 is the bulk of the deletion and is low-risk — every cut module is
-infrastructure the new model doesn't use. M3–M5 are additive/UI.
+| M | Status | Scope |
+|---|---|---|
+| **M1** | ✅ done | This doc — review + sign-off. |
+| **M2** | ✅ done | Cut the runtime layer: deleted the §8 "Cut" files, unwired IPC, stripped LiteRT from `paraphrase-bridge.ts`, shrunk the Makefile from 31 → 7 dev targets. Typecheck green. (~31 files, +165 / −4,582 lines.) |
+| **M3** | ✅ done | Authored the `setup/` scripts (§5) — `speech-sidecar.sh`, `hermes-faceplate-plugin.sh`, `hermes-event-hooks.sh`. Patched `adapter.py` for `FACEPLATE_BIND`. Parameterized sidecar paths (`VOICES_DIR` env override) so native runs work without root. |
+| **M3.5** | ✅ done | (Not in the original plan — added by user pivot.) Swapped Piper → Kokoro inside the bundled sidecar. New `backends/kokoro_tts.py`, rewrote `routes/tts.py` + `routes/voices.py`, `pyproject.toml` drops `piper-tts` for `kokoro-onnx` + `misaki[en]`. Entrypoint + setup script bootstrap Kokoro model + voices instead of a Piper voice. App schema `speech.tts.engine` collapses to single 'kokoro' value with `z.preprocess` migration from old 'piper' values. |
+| **M4** | ✅ done | Settings 11 → 6 panes (Connection, Voice, Avatar & Display, Hotkeys, Notifications & Pings, Privacy); wizard 6 → 3 steps. Schema cleanup dropped 7 dead fields, added `speech.enabled` master switch. ~19 files, +590 / −1,687 lines. |
+| **M5** | ✅ done | QUICKSTART / SETUP / sidecar README rewritten to the thin-client model; root README created; podman-migration-plan banner-marked as superseded; v1.todo trimmed. |
 
 ## 13. Open decisions
 

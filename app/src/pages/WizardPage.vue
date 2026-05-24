@@ -9,15 +9,16 @@
       header-nav
       class="wizard-stepper"
     >
+      <!-- ── Step 0: Welcome ──────────────────────────────────────── -->
       <q-step :name="0" title="Welcome" icon="celebration" :done="step > 0">
         <p>
-          Welcome to <strong>HermesAgent Faceplate</strong> — a tiny avatar that gives your
-          local hermes-agent a face, a voice, and a microphone. This wizard
-          walks through the four things we need to find on your machine.
+          Welcome to <strong>HermesAgent Faceplate</strong> — a desktop avatar
+          for a HermesAgent you already run.
         </p>
         <p class="muted">
-          Everything below runs locally. No data is sent anywhere except to
-          the LLM endpoint hermes-agent itself is configured to use.
+          Two short steps: point us at your Hermes, and (optionally) at a
+          speech service. The app is fully usable type-only — voice can stay
+          off and be flipped on later.
         </p>
         <q-stepper-navigation>
           <q-btn color="primary" no-caps label="Get started" @click="goNext" />
@@ -25,138 +26,105 @@
         </q-stepper-navigation>
       </q-step>
 
-      <q-step :name="1" title="Connect to hermes-agent" icon="hub" :done="step > 1">
+      <!-- ── Step 1: Connect to Hermes ────────────────────────────── -->
+      <q-step :name="1" title="Connect to HermesAgent" icon="hub" :done="step > 1">
         <p>
-          The Faceplate is a frontend — it talks to a HermesAgent gateway you run yourself. Pick how yours is set up:
+          The Faceplate is a client — it talks to a HermesAgent gateway you
+          run. Paste the URL and bearer token; works against any deployment
+          (local Docker, native, LAN, cloud).
         </p>
-        <q-option-group v-model="hermesLocation" :options="hermesLocationOptions" type="radio" class="q-mb-md" />
-        <q-banner v-if="hermesLocation === 'need_setup'" class="info q-mb-md" dense>
-          <template #avatar><q-icon name="info" color="primary" /></template>
-          <div>
-            HermesAgent is open-source and runs anywhere — local Docker is the easiest start.
-            See the official setup guide:
-            <a href="https://hermes-agent.nousresearch.com/docs/" rel="noopener noreferrer">hermes-agent.nousresearch.com/docs</a>.
-            Once it's running, come back here and choose "I have one running".
-          </div>
-        </q-banner>
-        <p v-if="hermesLocation !== 'need_setup'">
-          Paste the URL where hermes-agent's API server is reachable, plus the bearer token. Works against any deployment — local Docker, native, or remote.
-        </p>
-        <q-input v-if="hermesLocation !== 'need_setup'" v-model="hermesUrl" label="Gateway URL" filled stack-label hint="e.g. http://127.0.0.1:8642/v1" />
+
+        <q-input v-model="hermesUrl" label="Gateway URL" filled stack-label hint="e.g. http://127.0.0.1:8642/v1" />
         <q-input
-          v-if="hermesLocation !== 'need_setup'"
           v-model="hermesKey"
           class="q-mt-sm"
           label="API_SERVER_KEY"
           :type="showKey ? 'text' : 'password'"
           filled
           stack-label
-          hint="Set in your hermes-agent .env. Required for non-loopback URLs."
+          hint="From your Hermes deployment's .env (API_SERVER_KEY)."
         >
           <template #append>
             <q-btn flat dense round :icon="showKey ? 'visibility_off' : 'visibility'" @click="showKey = !showKey" />
           </template>
         </q-input>
-        <p v-if="hermesLocation !== 'need_setup' && !discovery.discovery" class="muted q-mt-md">Probing…</p>
-        <template v-if="hermesLocation !== 'need_setup' && discovery.discovery">
+
+        <p class="muted q-mt-md" style="font-size: 13px;">
+          Don't have Hermes yet?
+          <a href="https://hermes-agent.nousresearch.com/docs/" rel="noopener noreferrer">
+            HermesAgent's docs
+          </a>
+          have the install story (local Docker is the easiest start).
+          The Faceplate doesn't install or supervise Hermes for you.
+        </p>
+
+        <p v-if="!discovery.discovery" class="muted q-mt-md">Probing…</p>
+        <template v-else-if="discovery.discovery">
           <q-banner v-if="discovery.discovery.reachable" class="ok q-mt-md">
             <template #avatar><q-icon name="check_circle" color="positive" /></template>
             Reachable at <code>{{ discovery.discovery.base_url }}</code>{{ capabilityBlurb }}.
           </q-banner>
           <q-banner v-else class="warn q-mt-md">
             <template #avatar><q-icon name="warning" color="warning" /></template>
-            <span>
-              Couldn't reach hermes at <code>{{ discovery.discovery.base_url }}</code>{{ discovery.discovery.http_status ? ` (HTTP ${discovery.discovery.http_status})` : '' }}.
-              Check the URL, the token, and that hermes-agent is running with <code>API_SERVER_ENABLED=true</code>.
-            </span>
-          </q-banner>
-          <q-banner v-if="discovery.discovery.local_config_readable" class="info q-mt-sm" dense>
-            <template #avatar><q-icon name="folder" color="primary" /></template>
-            Local <code>~/.hermes/</code> also detected — the "Reuse hermes' LLM" paraphrase mode is available as an opt-in.
+            Couldn't reach hermes at <code>{{ discovery.discovery.base_url }}</code>{{ discovery.discovery.http_status ? ` (HTTP ${discovery.discovery.http_status})` : '' }}.
+            Check the URL, the token, and that hermes-agent is running with <code>API_SERVER_ENABLED=true</code>.
           </q-banner>
         </template>
-        <q-stepper-navigation>
-          <q-btn outline no-caps label="Re-probe" :loading="discovery.loading" @click="discovery.refresh()" />
-          <q-btn color="primary" no-caps label="Continue" class="q-ml-sm" @click="goNext" />
-        </q-stepper-navigation>
-      </q-step>
-
-      <q-step :name="2" title="Speech engine" icon="memory" :done="step > 2">
-        <p>
-          Pick the text-to-speech engine. The Faceplate also needs a speech-to-text + wake-word path; both come from the same sidecar.
-        </p>
-        <q-option-group v-model="ttsEngineChoice" :options="ttsEngineOptions" type="radio" />
-
-        <!-- The Faceplate connects to a speech sidecar by URL — it doesn't
-             run one. Show reachability; point the user at the setup script. -->
-        <q-card flat bordered class="q-mt-md wizard-action-card">
-          <q-card-section>
-            <div class="row items-center q-gutter-sm">
-              <q-chip
-                :color="sidecarChip.color"
-                :icon="sidecarChip.icon"
-                text-color="white"
-                dense
-              >
-                {{ sidecarChip.label }}
-              </q-chip>
-              <q-chip v-if="sidecarStatus?.url" outline dense>{{ sidecarStatus.url }}</q-chip>
-            </div>
-            <p class="muted q-mt-sm" style="margin-bottom: 0;">
-              Set up a sidecar with <code>setup/speech-sidecar.sh</code>, or bring your own
-              {{ ttsEngineChoice === 'kokoro' ? 'Kokoro' : 'OpenAI-compatible' }} endpoint —
-              then enter its URL and token in Settings → Speech Sidecar. You can finish the
-              wizard now and do this after; the Faceplate works type-only without voice.
-            </p>
-          </q-card-section>
-          <q-card-actions>
-            <q-btn flat dense no-caps icon="refresh" label="Refresh status" @click="refreshSidecar" />
-          </q-card-actions>
-        </q-card>
 
         <q-stepper-navigation>
           <q-btn flat no-caps label="Back" @click="goBack" />
+          <q-btn outline no-caps label="Re-probe" :loading="discovery.loading" class="q-ml-sm" @click="discovery.refresh()" />
           <q-btn color="primary" no-caps label="Continue" class="q-ml-sm" @click="goNext" />
         </q-stepper-navigation>
       </q-step>
 
-      <q-step :name="3" title="Test endpoints" icon="network_check" :done="step > 3">
-        <p>Verify the connections — anything red is fixable later in Settings.</p>
-        <div class="row q-col-gutter-md">
-          <div class="col-12"><TestConnectionButton target="agent" label="hermes-agent" /></div>
-          <div class="col-12"><TestConnectionButton target="tts" label="TTS sidecar" /></div>
-          <div class="col-12"><TestConnectionButton target="asr" label="ASR sidecar" /></div>
-          <!-- LLM + Paraphrase checks removed in v1: paraphrase routes
-               through hermes-agent directly (no separate LLM probe needed),
-               and LiteRT is hidden so the paraphrase test is redundant
-               with the agent test. -->
-        </div>
-        <q-stepper-navigation>
-          <q-btn flat no-caps label="Back" @click="goBack" />
-          <q-btn color="primary" no-caps label="Continue" class="q-ml-sm" @click="goNext" />
-        </q-stepper-navigation>
-      </q-step>
+      <!-- ── Step 2: Voice ────────────────────────────────────────── -->
+      <q-step :name="2" title="Voice" icon="mic" :done="step > 2">
+        <p>How do you want to interact with your agent?</p>
+        <q-option-group v-model="voiceMode" :options="voiceModeOptions" type="radio" />
 
-      <q-step :name="4" title="Voice" icon="mic" :done="step > 4">
-        <p>How do you want to talk to your agent?</p>
-        <q-option-group v-model="inputMode" :options="inputModeOptions" type="radio" />
-        <q-banner v-if="inputMode !== 'off'" class="info q-mt-md" dense>
-          Mic permission is requested when you first enable PTT or wake-word.
+        <template v-if="voiceMode !== 'off'">
+          <p class="muted q-mt-md" style="font-size: 13px;">
+            The Faceplate connects to a speech sidecar by URL — it doesn't run
+            one. Set one up with
+            <code>setup/speech-sidecar.sh</code> (native Kokoro + Whisper),
+            bring your own OpenAI-compatible endpoint, or point at a remote
+            one. The defaults below work for a local sidecar on this machine.
+          </p>
+          <q-input v-model="sidecarUrl" class="q-mt-md" label="Speech sidecar URL" filled stack-label />
+          <q-input
+            v-model="sidecarToken"
+            class="q-mt-sm"
+            label="Bearer token"
+            :type="showSidecarToken ? 'text' : 'password'"
+            filled
+            stack-label
+            hint="Printed by setup/speech-sidecar.sh; empty disables auth (dev only)."
+          >
+            <template #append>
+              <q-btn flat dense round :icon="showSidecarToken ? 'visibility_off' : 'visibility'" @click="showSidecarToken = !showSidecarToken" />
+            </template>
+          </q-input>
+
+          <q-banner v-if="sidecarStatus" :class="sidecarStatus.up ? 'ok q-mt-md' : 'warn q-mt-md'" dense>
+            <template #avatar>
+              <q-icon :name="sidecarStatus.up ? 'check_circle' : 'pause_circle'" :color="sidecarStatus.up ? 'positive' : 'warning'" />
+            </template>
+            <span v-if="sidecarStatus.up">
+              Sidecar reachable at <code>{{ sidecarStatus.url }}</code>.
+            </span>
+            <span v-else>
+              Not reachable yet. You can finish the wizard and start the
+              sidecar later — voice will start working as soon as it's up.
+            </span>
+          </q-banner>
+        </template>
+
+        <q-banner v-if="voiceMode !== 'off'" class="info q-mt-md" dense>
+          Mic permission is requested when push-to-talk or wake-word fires.
           The avatar's halo shows a green LED whenever the mic is open.
         </q-banner>
-        <q-stepper-navigation>
-          <q-btn flat no-caps label="Back" @click="goBack" />
-          <q-btn color="primary" no-caps label="Continue" class="q-ml-sm" @click="goNext" />
-        </q-stepper-navigation>
-      </q-step>
 
-      <q-step :name="5" title="Display" icon="layers" :done="step > 5">
-        <p>Where should the avatar live?</p>
-        <q-option-group v-model="avatarMode" :options="avatarModeOptions" type="radio" />
-        <p class="muted q-mt-sm">
-          You can flip this any time from Settings → Avatar / Theme.
-          {{ recommendation }}
-        </p>
         <q-stepper-navigation>
           <q-btn flat no-caps label="Back" @click="goBack" />
           <q-btn color="primary" no-caps label="Finish" class="q-ml-sm" @click="finish" />
@@ -168,42 +136,49 @@
 
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue';
-import { useQuasar } from 'quasar';
 
-import TestConnectionButton from '../components/settings/TestConnectionButton.vue';
 import { useSetting } from '../composables/use-setting';
 import { useSettingsStore } from '../stores/settings';
 import { useDiscoveryStore } from '../stores/discovery';
 import type { SidecarStatus } from '../../src-electron/preload-api';
 
-const $q = useQuasar();
-
 const step = ref<number>(0);
 const settings = useSettingsStore();
 const discovery = useDiscoveryStore();
 
-const sidecarMode = useSetting('speech.sidecar_mode');
-const sidecarImage = useSetting('speech.sidecar_image');
-const paraphraseMode = useSetting('paraphrase.model');
+// Persisted settings the wizard reads/writes.
+const hermesUrl = useSetting('hermes.base_url');
+const hermesKey = useSetting('hermes.api_key');
+const speechEnabled = useSetting('speech.enabled');
 const inputMode = useSetting('input.mode');
-const avatarMode = useSetting('avatar.mode');
+const sidecarUrl = useSetting('speech.sidecar_url');
+const sidecarToken = useSetting('speech.sidecar_token');
 const wizardCompleted = useSetting('wizard.completed');
 const wizardStep = useSetting('wizard.last_step');
 
-const hermesUrl = useSetting('hermes.base_url');
-const hermesKey = useSetting('hermes.api_key');
 const showKey = ref(false);
-const ttsEngineChoice = useSetting('speech.tts.engine');
+const showSidecarToken = ref(false);
 
-// Wizard-only state — captures the user's intent at install time. We
-// don't persist this in settings.yaml (the actual hermes URL/key fields
-// drive runtime behavior); it's just a branching aid for the wizard UI
-// so users with no Hermes installed see a "set it up first" pointer
-// instead of a fields-and-banner UX they can't fill in.
-const hermesLocation = ref<'have' | 'need_setup'>('have');
-const hermesLocationOptions = [
-  { label: 'I have a Hermes gateway running (URL + key ready)', value: 'have' },
-  { label: "I need to install Hermes first — show me where to start", value: 'need_setup' },
+// Voice mode unifies the master speech.enabled toggle with input.mode so the
+// wizard offers a single tidy radio. 'off' → speech.enabled=false (no TTS,
+// no STT); PTT/wake → speech.enabled=true + input.mode=ptt|wake.
+type VoiceMode = 'off' | 'push_to_talk' | 'wake_word';
+const voiceMode = computed<VoiceMode>({
+  get: () => (speechEnabled.value ? (inputMode.value as VoiceMode) : 'off'),
+  set: (next) => {
+    if (next === 'off') {
+      speechEnabled.value = false;
+      inputMode.value = 'off';
+    } else {
+      speechEnabled.value = true;
+      inputMode.value = next;
+    }
+  },
+});
+const voiceModeOptions = [
+  { label: 'Off — type only', value: 'off' },
+  { label: 'Push-to-talk hotkey', value: 'push_to_talk' },
+  { label: 'Wake word — "Hey Hermes" hands-free', value: 'wake_word' },
 ];
 
 const capabilityBlurb = computed(() => {
@@ -212,36 +187,11 @@ const capabilityBlurb = computed(() => {
   return ` (model: ${caps.model})`;
 });
 
-const sidecarModeOptions = [
-  { label: 'Bundled Docker container (recommended)', value: 'bundled' },
-  { label: 'External URL (I run my own)', value: 'external' },
-  { label: 'Disabled (no TTS / ASR)', value: 'disabled' },
-];
-
-const imageOptions = [
-  { label: 'cpu-slim — recommended (no on-device LLM, paraphrase via Hermes)', value: 'cpu-slim' },
-  { label: 'cpu — full bundle (kept for backward compat)', value: 'cpu' },
-  { label: 'cuda — GPU', value: 'cuda' },
-];
-
-const ttsEngineOptions = [
-  { label: 'Kokoro-82M (bundled — high-quality, ~352 MB first-run download)', value: 'kokoro' },
-];
-
-// ─── speech sidecar status, in-wizard ───────────────────────────────────
-//
-// The Faceplate connects to a speech sidecar by URL; it doesn't run one.
-// The wizard just shows whether one is reachable and polls while the user
-// is on the speech step. `sidecar.status()` is a plain health probe.
+// Live sidecar reachability for the voice step. Polls every 3 s while the
+// user is on that step so the chip flips green as soon as they bring up
+// their sidecar in a terminal.
 const sidecarStatus = ref<SidecarStatus | null>(null);
-let sidecarPollTimer: ReturnType<typeof setInterval> | null = null;
-
-const sidecarChip = computed(() => {
-  const s = sidecarStatus.value;
-  if (!s) return { label: 'Checking…', icon: 'hourglass_top', color: 'grey-6' };
-  if (s.up) return { label: `Reachable · ${s.build ?? 'cpu'}`, icon: 'check_circle', color: 'positive' };
-  return { label: 'Not reachable yet', icon: 'pause_circle', color: 'grey-6' };
-});
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 async function refreshSidecar(): Promise<void> {
   if (!window.faceplate) return;
@@ -252,47 +202,22 @@ async function refreshSidecar(): Promise<void> {
   }
 }
 
-// Poll the sidecar health probe while the user is on the speech step.
 watch(
   () => step.value,
   (s) => {
-    if (sidecarPollTimer) { clearInterval(sidecarPollTimer); sidecarPollTimer = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     if (s !== 2) return;
     void refreshSidecar();
-    sidecarPollTimer = setInterval(() => void refreshSidecar(), 3_000);
+    pollTimer = setInterval(() => void refreshSidecar(), 3_000);
   },
-  { immediate: true },
 );
 
-onBeforeUnmount(() => {
-  if (sidecarPollTimer) clearInterval(sidecarPollTimer);
-});
-
-const inputModeOptions = [
-  { label: 'Off — type only', value: 'off' },
-  { label: 'Push-to-talk hotkey', value: 'push_to_talk' },
-  { label: '"Hey Hermes" wake word', value: 'wake_word' },
-];
-
-const avatarModeOptions = [
-  { label: 'Overlay — transparent, always-on-top', value: 'overlay' },
-  { label: 'Windowed — regular window', value: 'windowed' },
-];
-
-const recommendation = computed(() => {
-  const fp = window.faceplate;
-  if (!fp) return '';
-  if (fp.platform.is_wayland) return 'Wayland detected — Windowed is more reliable.';
-  if (fp.platform.os === 'darwin') return 'macOS — Overlay works great.';
-  if (fp.platform.os === 'win32') return 'Windows — Overlay usually works; flip to Windowed if input feels off.';
-  return 'Linux X11 — Overlay supported.';
-});
+onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer); });
 
 function goNext(): void {
-  step.value = Math.min(step.value + 1, 5);
+  step.value = Math.min(step.value + 1, 2);
   wizardStep.value = step.value;
 }
-
 function goBack(): void {
   step.value = Math.max(step.value - 1, 0);
   wizardStep.value = step.value;
@@ -300,14 +225,17 @@ function goBack(): void {
 
 async function finish(): Promise<void> {
   wizardCompleted.value = true;
-  // Tell main to apply the chosen mode (it owns the window factory).
+  // Apply the chosen avatar mode (electron-main owns the window factory).
+  // Display mode is auto-detected on first run (Wayland → windowed); the
+  // user can still flip it later from Settings → Avatar & Display.
   await window.faceplate?.window.setMode(settings.settings.avatar.mode);
   window.close();
 }
 
 onMounted(async () => {
   if (!discovery.discovery) await discovery.refresh();
-  step.value = settings.settings.wizard.last_step ?? 0;
+  // Clamp any persisted step from an older wizard (which had more steps).
+  step.value = Math.min(settings.settings.wizard.last_step ?? 0, 2);
 });
 </script>
 
@@ -330,35 +258,12 @@ code {
   border-radius: 3px;
   font: 12px/1 'JetBrains Mono', ui-monospace, monospace;
 }
-.snippet,
-.wizard-code {
-  margin: 6px 0 0;
-  padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.4);
-  color: #d8d8d8;
-  border-radius: 4px;
-  font: 12px/1.45 'JetBrains Mono', ui-monospace, monospace;
-  white-space: pre-wrap;
-  user-select: text;
-}
+a { color: #7fdcff; }
 .ok { background: rgba(34, 197, 94, 0.12); border-radius: 8px; }
 .warn { background: rgba(245, 158, 11, 0.12); border-radius: 8px; }
 .info { background: rgba(59, 130, 246, 0.12); border-radius: 8px; }
 
-/* In-wizard action cards (start sidecar, install kokoro). Keeps the
- * primary CTA visually contained against the dark wizard background. */
-.wizard-action-card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-}
-
-/* The wizard runs on a dark background but Quasar's `filled` inputs
- * default to a near-black surface with dark grey text — unreadable
- * against our #0e0e10 shell. Force a slightly lighter input fill +
- * explicit light text color across all q-inputs / q-selects in the
- * wizard. :deep is required because q-input renders its native
- * <input> deep inside scoped slots. */
+/* Wizard runs on a dark background; force readable text in Quasar inputs. */
 .wizard-shell :deep(.q-field--filled .q-field__control) {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -384,19 +289,12 @@ code {
 .wizard-shell :deep(.q-field__messages) {
   color: rgba(244, 245, 248, 0.55);
 }
-/* Radio / checkbox labels too — q-option-group items render with the
- * same default near-black text color. */
 .wizard-shell :deep(.q-radio__label),
 .wizard-shell :deep(.q-checkbox__label),
 .wizard-shell :deep(.q-toggle__label),
 .wizard-shell :deep(.q-item__label) {
   color: #f4f5f8;
 }
-
-/* Radio circle visibility. Quasar paints the inactive ring + the
- * checked-state dot in `currentColor` of an inner `<svg>` — on a dark
- * surface both default colours collapse to invisible. Force a light ring
- * for the unchecked state and a clear cyan fill for the checked state. */
 .wizard-shell :deep(.q-radio__bg) {
   color: rgba(255, 255, 255, 0.6);
 }
@@ -409,17 +307,5 @@ code {
 }
 .wizard-shell :deep(.q-radio__inner) {
   color: rgba(255, 255, 255, 0.7);
-}
-/* Same fix for checkboxes (no places use them in the wizard today,
- * but kept here so future additions don't break). */
-.wizard-shell :deep(.q-checkbox__bg) {
-  border-color: rgba(255, 255, 255, 0.6);
-}
-.wizard-shell :deep(.q-checkbox--checked .q-checkbox__bg) {
-  background: #7fdcff;
-  border-color: #7fdcff;
-}
-.wizard-shell :deep(.q-checkbox__svg) {
-  color: #0e0e10;
 }
 </style>

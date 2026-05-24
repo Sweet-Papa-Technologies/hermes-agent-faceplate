@@ -18,7 +18,7 @@ export async function replayLastAssistant(): Promise<void> {
 
   const settings = useSettingsStore();
   const speech = settings.settings.speech;
-  if (speech.sidecar_mode === 'disabled') return;
+  if (!speech.enabled) return;
 
   const agent = useAgentStore();
   if (active) {
@@ -42,7 +42,7 @@ export async function replayLastAssistant(): Promise<void> {
       model: speech.tts.model,
       speed: speech.tts.rate,
     },
-    format: speech.tts.format,
+    format: 'mp3',
     onAnalyser: (analyser) => {
       driver = startVisemeDriver(analyser);
       eventBus.emit({
@@ -50,8 +50,8 @@ export async function replayLastAssistant(): Promise<void> {
         ts: Date.now(),
         payload: {
           voice: speech.tts.voice,
-          mime: mimeFor(speech.tts.format),
-          format: speech.tts.format,
+          mime: mimeFor('mp3'),
+          format: 'mp3',
         },
       });
     },
