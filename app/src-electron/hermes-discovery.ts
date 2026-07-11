@@ -30,6 +30,7 @@ import {
   type HermesCapabilities,
   type HermesDiscovery,
   type HermesLocalConfig,
+  type HermesConnectionCandidate,
 } from './preload-api';
 import { getSettings } from './settings-store';
 
@@ -59,6 +60,91 @@ function hermesHome(): string {
     return path.dirname(configPath);
   }
   return path.join(os.homedir(), '.hermes');
+}
+
+function gatewayUrl(host: string, port: number): string {
+  const normalizedHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+  const urlHost = normalizedHost.includes(':') && !normalizedHost.startsWith('[')
+    ? `[${normalizedHost}]`
+    : normalizedHost;
+  return `http://${urlHost}:${port}/v1`;
+}
+
+interface LocalCandidateSeed {
+  base_url: string;
+  source: HermesConnectionCandidate['source'];
+  label: string;
+  api_key?: string;
+  config_path?: string;
+}
+
+/** Cheap, bounded discovery only: known config homes, process environment,
+ * and exact executable names on PATH. It deliberately never recursively
+ * scans disks or starts/installs Hermes. */
+function localCandidateSeeds(configuredUrl: string, configuredKey: string): LocalCandidateSeed[] {
+  const seeds: LocalCandidateSeed[] = [{
+    base_url: configuredUrl,
+    source: 'settings',
+    label: 'Current settings',
+    ...(configuredKey ? { api_key: configuredKey } : {}),
+  }];
+
+  const envHost = process.env.API_SERVER_HOST;
+  const envPort = Number(process.env.API_SERVER_PORT ?? DEFAULT_API_PORT);
+  if (envHost || process.env.API_SERVER_PORT || process.env.API_SERVER_KEY) {
+    seeds.push({
+      base_url: gatewayUrl(envHost ?? DEFAULT_API_HOST, Number.isFinite(envPort) ? envPort : DEFAULT_API_PORT),
+      source: 'environment',
+      label: 'Hermes environment variables',
+      ...(process.env.API_SERVER_KEY ? { api_key: process.env.API_SERVER_KEY } : {}),
+    });
+  }
+
+  const configuredPath = expandPath(getSettings().hermes.config_path);
+  const homes = new Set([
+    process.env.HERMES_HOME,
+    configuredPath.endsWith('config.yaml') ? path.dirname(configuredPath) : undefined,
+    path.join(os.homedir(), '.hermes'),
+  ].filter((value): value is string => Boolean(value)));
+
+  for (const home of homes) {
+    const envPath = path.join(home, '.env');
+    const configPath = path.join(home, 'config.yaml');
+    if (!existsSync(envPath) && !existsSync(configPath)) continue;
+    let env: Record<string, string> = {};
+    try { if (existsSync(envPath)) env = parseDotenv(readFileSync(envPath, 'utf8')); } catch { /* best effort */ }
+    const port = Number(env.API_SERVER_PORT ?? DEFAULT_API_PORT);
+    seeds.push({
+      base_url: gatewayUrl(env.API_SERVER_HOST ?? DEFAULT_API_HOST, Number.isFinite(port) ? port : DEFAULT_API_PORT),
+      source: 'config',
+      label: `Local Hermes (${home})`,
+      ...(env.API_SERVER_KEY ? { api_key: env.API_SERVER_KEY } : {}),
+      config_path: configPath,
+    });
+  }
+
+  const executableNames = process.platform === 'win32' ? ['hermes.exe', 'hermes.cmd'] : ['hermes'];
+  const pathEntries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  const knownExecutables = process.platform === 'win32'
+    ? []
+    : [path.join(os.homedir(), '.local', 'bin', 'hermes'), '/usr/local/bin/hermes', '/opt/homebrew/bin/hermes'];
+  const executableFound = knownExecutables.some(existsSync) || pathEntries.some((dir) =>
+    executableNames.some((name) => existsSync(path.join(dir, name))),
+  );
+  if (executableFound) {
+    seeds.push({ base_url: gatewayUrl(DEFAULT_API_HOST, DEFAULT_API_PORT), source: 'path', label: 'Hermes CLI on PATH' });
+  }
+
+  const deduped = new Map<string, LocalCandidateSeed>();
+  for (const seed of seeds) {
+    const key = seed.base_url.replace(/\/+$/, '');
+    const previous = deduped.get(key);
+    // Prefer candidates carrying a key/config over a bare PATH hint.
+    if (!previous || (!previous.api_key && seed.api_key) || (previous.source === 'path' && seed.source !== 'path')) {
+      deduped.set(key, { ...seed, base_url: key });
+    }
+  }
+  return [...deduped.values()];
 }
 
 function parseDotenv(content: string): Record<string, string> {
@@ -287,10 +373,16 @@ export async function discoverHermes(): Promise<HermesDiscovery> {
   const baseUrl = settings.hermes.base_url.replace(/\/+$/, '');
   const apiKey = settings.hermes.api_key;
 
-  const [probe, local] = await Promise.all([
+  const seeds = localCandidateSeeds(baseUrl, apiKey);
+  const [probe, local, candidateProbes] = await Promise.all([
     httpProbe(baseUrl, apiKey),
     Promise.resolve(readLocalConfig()),
+    Promise.all(seeds.map((candidate) => httpProbe(candidate.base_url, candidate.api_key ?? ''))),
   ]);
+  const candidates: HermesConnectionCandidate[] = seeds.map((candidate, index) => ({
+    ...candidate,
+    reachable: candidateProbes[index]?.reachable ?? false,
+  })).sort((a, b) => Number(b.reachable) - Number(a.reachable));
 
   // If HTTP probe succeeded but no key has been pasted into Settings AND
   // local .env has one, surface a hint.
@@ -316,6 +408,7 @@ export async function discoverHermes(): Promise<HermesDiscovery> {
     local_config_readable: local.readable,
     ...(local.config ? { local_config: local.config } : {}),
     warnings,
+    candidates,
   };
 }
 

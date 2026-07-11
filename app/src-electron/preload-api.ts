@@ -147,6 +147,18 @@ export interface HermesDiscovery {
   local_config_readable: boolean;
   local_config?: HermesLocalConfig;
   warnings: string[];
+  /** Locally detected gateway configurations. Secrets are only returned when
+   * they came from this user's environment/config files and are never logged. */
+  candidates: HermesConnectionCandidate[];
+}
+
+export interface HermesConnectionCandidate {
+  base_url: string;
+  source: 'settings' | 'environment' | 'config' | 'path';
+  label: string;
+  reachable: boolean;
+  api_key?: string;
+  config_path?: string;
 }
 
 export type ConnectionTarget = 'agent' | 'llm' | 'tts' | 'asr' | 'paraphrase';
