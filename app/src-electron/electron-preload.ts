@@ -45,20 +45,10 @@ const hermes: FaceplatePreload['hermes'] = {
   testConnection: (target: ConnectionTarget) =>
     ipcRenderer.invoke(IPC.hermes.test, target),
   paraphrase: (text: string) => ipcRenderer.invoke(IPC.hermes.paraphrase, text),
+  paraphraseProbe: () => ipcRenderer.invoke(IPC.hermes.paraphraseProbe),
   hookPreview: () => ipcRenderer.invoke(IPC.hermes.hookPreview),
   hookInstall: () => ipcRenderer.invoke(IPC.hermes.hookInstall),
   hookUninstall: () => ipcRenderer.invoke(IPC.hermes.hookUninstall),
-  agentStatus: () => ipcRenderer.invoke(IPC.hermes.agentStatus),
-  installAgent: () => ipcRenderer.invoke(IPC.hermes.agentInstall),
-  stopAgent: () => ipcRenderer.invoke(IPC.hermes.agentStop),
-  onAgentInstallProgress: (cb) => {
-    const listener = (
-      _e: unknown,
-      p: import('./preload-api').HermesInstallProgress,
-    ) => cb(p);
-    ipcRenderer.on(IPC.hermes.agentInstallProgress, listener);
-    return () => ipcRenderer.removeListener(IPC.hermes.agentInstallProgress, listener);
-  },
 };
 
 const win: FaceplatePreload['window'] = {
@@ -101,8 +91,6 @@ const audio: FaceplatePreload['audio'] = {
 
 const sidecar: FaceplatePreload['sidecar'] = {
   status: () => ipcRenderer.invoke(IPC.sidecar.status),
-  start: () => ipcRenderer.invoke(IPC.sidecar.start),
-  stop: () => ipcRenderer.invoke(IPC.sidecar.stop),
 };
 
 const themes: FaceplatePreload['themes'] = {
@@ -131,22 +119,6 @@ const platform: FaceplatePreload['platform'] = {
   openExternal: (url: string) => ipcRenderer.invoke(IPC.platform.openExternal, url),
 };
 
-const kokoro: FaceplatePreload['kokoro'] = {
-  status: () => ipcRenderer.invoke(IPC.kokoro.status),
-  ensure: () => ipcRenderer.invoke(IPC.kokoro.ensure),
-  stop: () => ipcRenderer.invoke(IPC.kokoro.stop),
-};
-
-const podman: FaceplatePreload['podman'] = {
-  status: () => ipcRenderer.invoke(IPC.podman.status),
-  install: () => ipcRenderer.invoke(IPC.podman.install),
-  ensureMachine: () => ipcRenderer.invoke(IPC.podman.ensureMachine),
-  stopMachine: () => ipcRenderer.invoke(IPC.podman.stopMachine),
-  legacyScan: () => ipcRenderer.invoke(IPC.podman.legacyScan),
-  offboardLegacy: (names: string[]) =>
-    ipcRenderer.invoke(IPC.podman.offboardLegacy, names),
-};
-
 const agentPush: FaceplatePreload['agentPush'] = {
   onFrame: (cb) => {
     const listener = (
@@ -159,8 +131,6 @@ const agentPush: FaceplatePreload['agentPush'] = {
   status: () => ipcRenderer.invoke(IPC.agentPush.status),
   installPreview: () => ipcRenderer.invoke(IPC.agentPush.installPreview),
   install: () => ipcRenderer.invoke(IPC.agentPush.install),
-  restartHermes: (name: string) =>
-    ipcRenderer.invoke(IPC.agentPush.restartHermes, name),
 };
 
 const notify: FaceplatePreload['notify'] = {
@@ -282,8 +252,6 @@ const api: FaceplatePreload = {
   platform,
   notify,
   agentPush,
-  kokoro,
-  podman,
   typingBar,
   conversations,
   artifacts,

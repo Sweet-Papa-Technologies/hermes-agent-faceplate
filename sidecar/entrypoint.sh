@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Faceplate sidecar entrypoint. Sets the build flag from the image variant
-# and execs uvicorn so signals reach the FastAPI app cleanly.
+# Faceplate sidecar entrypoint. Sets the build flag from the image variant,
+# bootstraps the Kokoro model + voices on first run, then execs uvicorn so
+# signals reach the FastAPI app cleanly.
 
 set -euo pipefail
 
@@ -12,45 +13,40 @@ export FACEPLATE_BUILD FACEPLATE_API_KEY
 # first run).
 mkdir -p /models /voices /wakewords /etc/faceplate-sidecar
 
-# Bootstrap the default Piper voice on first start. faster-whisper auto-pulls
-# from HF on first request, but Piper voices have to be present at synthesis
-# time — there's no lazy fetch. Skip if the voice is already in the volume.
-bootstrap_piper_voice() {
-  local voice="${PIPER_DEFAULT_VOICE:-en_US-amy-medium}"
-  local onnx="/voices/${voice}.onnx"
-  local config="/voices/${voice}.onnx.json"
-  if [ -f "${onnx}" ] && [ -f "${config}" ]; then
+# Kokoro release artifacts (thewh1teagle/kokoro-onnx, pinned to v1.0).
+# Model is ~325 MB, voices file ~27 MB. faster-whisper auto-pulls ASR
+# models from HF on first request; only TTS needs explicit bootstrap.
+KOKORO_RELEASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+KOKORO_MODEL="/voices/kokoro-v1.0.onnx"
+KOKORO_VOICES="/voices/voices-v1.0.bin"
+
+bootstrap_kokoro() {
+  if [ -f "${KOKORO_MODEL}" ] && [ -f "${KOKORO_VOICES}" ]; then
     return 0
   fi
-  # Map voice id → HF subpath. Format is rhasspy/piper-voices/<lang>/<locale>/<speaker>/<quality>/<voice>.onnx
-  # The default 'en_US-amy-medium' lives under en/en_US/amy/medium/.
-  local lang locale speaker quality
-  lang="${voice%%_*}"           # en
-  locale="${voice%-*}"          # en_US-amy
-  locale="${locale%-*}"         # en_US
-  speaker_quality="${voice#*-}" # amy-medium
-  speaker="${speaker_quality%-*}"  # amy
-  quality="${speaker_quality##*-}" # medium
-  local hf_base="https://huggingface.co/rhasspy/piper-voices/resolve/main/${lang}/${locale}/${speaker}/${quality}"
-  echo "[faceplate-sidecar] bootstrapping Piper voice: ${voice}"
-  if ! curl -fsSL "${hf_base}/${voice}.onnx" -o "${onnx}.tmp"; then
-    echo "[faceplate-sidecar] WARN: failed to download ${voice}.onnx — TTS will fail until you drop one into the faceplate-voices volume."
-    rm -f "${onnx}.tmp"
-    return 0
+  echo "[faceplate-sidecar] bootstrapping Kokoro (~352 MB, one-time)…"
+  if [ ! -f "${KOKORO_MODEL}" ]; then
+    if ! curl -fsSL "${KOKORO_RELEASE}/kokoro-v1.0.onnx" -o "${KOKORO_MODEL}.tmp"; then
+      echo "[faceplate-sidecar] WARN: failed to download kokoro-v1.0.onnx — TTS will 5xx until present."
+      rm -f "${KOKORO_MODEL}.tmp"
+      return 0
+    fi
+    mv "${KOKORO_MODEL}.tmp" "${KOKORO_MODEL}"
   fi
-  mv "${onnx}.tmp" "${onnx}"
-  if ! curl -fsSL "${hf_base}/${voice}.onnx.json" -o "${config}.tmp"; then
-    echo "[faceplate-sidecar] WARN: failed to download ${voice}.onnx.json"
-    rm -f "${config}.tmp"
-    return 0
+  if [ ! -f "${KOKORO_VOICES}" ]; then
+    if ! curl -fsSL "${KOKORO_RELEASE}/voices-v1.0.bin" -o "${KOKORO_VOICES}.tmp"; then
+      echo "[faceplate-sidecar] WARN: failed to download voices-v1.0.bin"
+      rm -f "${KOKORO_VOICES}.tmp"
+      return 0
+    fi
+    mv "${KOKORO_VOICES}.tmp" "${KOKORO_VOICES}"
   fi
-  mv "${config}.tmp" "${config}"
-  echo "[faceplate-sidecar] Piper voice ready at ${onnx}"
+  echo "[faceplate-sidecar] Kokoro ready at ${KOKORO_MODEL}"
 }
 
-bootstrap_piper_voice
+bootstrap_kokoro
 
-# Print startup banner so docker-compose logs are interpretable.
+# Print startup banner so container logs are interpretable.
 echo "[faceplate-sidecar] build=${FACEPLATE_BUILD} starting on :8080"
 
 exec uvicorn faceplate_sidecar.main:app \

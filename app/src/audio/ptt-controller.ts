@@ -199,7 +199,7 @@ function cancel(): void {
 
 function asrEndpointFromSettings(settings: ReturnType<typeof useSettingsStore>): AsrEndpoint | null {
   const s = settings.settings.speech;
-  if (s.sidecar_mode === 'disabled') return null;
+  if (!s.enabled) return null;
   return {
     baseUrl: `${s.sidecar_url.replace(/\/$/, '')}/v1`,
     ...(s.sidecar_token ? { apiKey: s.sidecar_token } : {}),

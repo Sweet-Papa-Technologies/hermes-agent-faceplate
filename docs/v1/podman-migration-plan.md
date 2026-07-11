@@ -1,5 +1,20 @@
 # Docker → Podman Migration Plan
 
+> ⚠ **SUPERSEDED — kept for historical reference.**
+>
+> This plan was executed end-to-end (M0–M6) on 2026-05-17. It was then
+> **retired** by the audience pivot captured in
+> [`rescope.md`](./rescope.md): the Faceplate is now a thin client and
+> does not install, install Podman, or manage a `podman machine`. The
+> `container-runtime.ts` / `podman-installer.ts` / `podman-machine.ts` /
+> `hermes-lifecycle.ts` modules described below were all deleted in M2 of
+> the re-scope. A "consumer edition" that ships an app-managed runtime
+> could revive this plan from git history; the current product does not.
+>
+> Read this only for the M0 spike findings (rootless volume ownership,
+> `host.docker.internal` aliasing on Podman 5.x, the `credsStore` gotcha)
+> — those facts about Podman itself remain accurate.
+
 Status: **proposed — for review, no code written yet**
 Author: planning pass, 2026-05-17
 

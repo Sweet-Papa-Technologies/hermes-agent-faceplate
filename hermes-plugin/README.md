@@ -10,8 +10,52 @@ Hermes has no first-party `/v1/inbox` or push SSE on its API server (see `docs/v
 
 ## Install
 
+Three paths; pick whichever fits where Hermes runs.
+
+### A. In-app installer
+
+For exactly one case: Hermes runs **directly on this machine** as a
+regular process under this user, reading `~/.hermes/`. The button writes
+into that directory and runs `hermes plugins enable faceplate` for you.
+
+In the Faceplate: **Settings → Notifications & Pings → Install plugin.**
+A preview dialog shows the files it'll touch; click *Install*, restart
+your Hermes. Done.
+
+For *anything else* — Hermes on another host, Hermes under a different
+user, Hermes inside a sandbox or container — use path B. The Faceplate
+itself doesn't care which one it is; the install just has to land where
+the Hermes process actually looks for plugins, and the WS port has to be
+reachable from wherever the Faceplate runs. Both of those are
+Hermes-side concerns.
+
+### B. Standalone script (any Hermes you can SSH to)
+
+Run on the Hermes host, from a clone of the repo:
+
 ```sh
-# From this repo
+bash setup/hermes-faceplate-plugin.sh [--bind 0.0.0.0] [--port 8643]
+```
+
+Pass `--bind 0.0.0.0` (or a specific reachable address) when the Faceplate
+runs on a different machine. The script:
+
+1. Copies the plugin into `~/.hermes/plugins/faceplate/`.
+2. Appends env vars to `~/.hermes/.env` (generating a key if absent,
+   never clobbering).
+3. Runs `hermes plugins enable faceplate` — Hermes ships user plugins
+   disabled by default, and without this step the gateway sees the files
+   but never starts the adapter (symptom: `ECONNREFUSED 127.0.0.1:8643`
+   even after a restart).
+4. Prints the WebSocket URL + key to paste into the Faceplate.
+
+Restart Hermes when prompted. Then in the app: **Settings → Notifications
+& Pings → Enable pings** and paste both.
+
+### C. By hand (if you don't have the repo)
+
+```sh
+# Copy this directory to ~/.hermes/plugins/faceplate/
 cp -R hermes-plugin/faceplate ~/.hermes/plugins/faceplate
 
 # Add to ~/.hermes/.env (generate a strong random key for production)
@@ -19,13 +63,20 @@ cat >> ~/.hermes/.env <<'EOF'
 FACEPLATE_API_KEY=replace-me-with-a-random-secret
 FACEPLATE_HOME_CHANNEL=default
 FACEPLATE_PORT=8643
+# Optional — listen interface. 127.0.0.1 is the default; set 0.0.0.0 (or a
+# specific address) when the Faceplate runs on a different machine.
+# FACEPLATE_BIND=0.0.0.0
 EOF
 
+# Enable the plugin (Hermes ships user plugins disabled by default).
+hermes plugins enable faceplate
+
 # Restart the Hermes gateway so the plugin loader picks up the new dir.
-docker restart hermes-personal   # or however you restart yours
+hermes gateway   # or however you restart yours
 ```
 
-Then in the Faceplate: Settings → Notifications & Push → enable "Receive unprompted messages from Hermes", paste the same `FACEPLATE_API_KEY` value.
+Then in the Faceplate: **Settings → Notifications & Pings**, enable, and
+paste the matching URL + `FACEPLATE_API_KEY`.
 
 ## Verify
 

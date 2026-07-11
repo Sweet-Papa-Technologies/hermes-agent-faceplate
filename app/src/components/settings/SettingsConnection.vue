@@ -107,6 +107,33 @@
       <TestConnectionButton target="llm" label="Test LLM" />
     </div>
 
+    <h3>Canvas eagerness</h3>
+    <q-card flat bordered class="card">
+      <q-card-section>
+        <div class="row q-col-gutter-md">
+          <q-btn
+            v-for="opt in eagernessOptions"
+            :key="opt.value"
+            :class="['eager-card col', eagerness === opt.value ? 'eager-card-active' : '']"
+            flat
+            no-caps
+            stack
+            @click="eagerness = opt.value"
+          >
+            <q-icon :name="opt.icon" size="28px" />
+            <div class="eager-label">{{ opt.label }}</div>
+            <div class="eager-caption">{{ opt.caption }}</div>
+          </q-btn>
+        </div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section class="muted">
+        <q-icon name="info" /> Every reply gets the <code>&lt;artifact&gt;</code>
+        protocol injected as a system instruction; this knob tells the model how
+        eager it should be to actually use it. Changes apply on the next message.
+      </q-card-section>
+    </q-card>
+
     <h3>System-wide event tap</h3>
     <q-item tag="label" class="card-row">
       <q-item-section>
@@ -130,12 +157,26 @@ import { useSetting } from '../../composables/use-setting';
 import { useDiscoveryStore } from '../../stores/discovery';
 import TestConnectionButton from './TestConnectionButton.vue';
 import HookPreviewDialog from './HookPreviewDialog.vue';
+import type { ArtifactsSettings } from '../../stores/settings-schema';
 import type { HookInstallResult } from '../../../src-electron/preload-api';
 
 const baseUrl = useSetting('hermes.base_url');
 const apiKey = useSetting('hermes.api_key');
 const configPath = useSetting('hermes.config_path');
 const installShellHook = useSetting('hermes.install_shell_hook');
+const eagerness = useSetting('artifacts.eagerness');
+
+const eagernessOptions: Array<{
+  value: ArtifactsSettings['eagerness'];
+  label: string;
+  caption: string;
+  icon: string;
+}> = [
+  { value: 'subtle',     label: 'Subtle',     icon: 'tune',          caption: 'Only when explicitly asked.' },
+  { value: 'balanced',   label: 'Balanced',   icon: 'balance',       caption: 'When it materially helps.' },
+  { value: 'liberal',    label: 'Liberal',    icon: 'auto_awesome',  caption: 'Whenever feasible.' },
+  { value: 'aggressive', label: 'Aggressive', icon: 'whatshot',      caption: 'Every reply that can.' },
+];
 
 const showKey = ref(false);
 const hookBusy = ref(false);
@@ -211,4 +252,25 @@ h3 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; color: #555; text-tr
 .warning { background: rgba(245, 158, 11, 0.12); border-radius: 8px; }
 .test-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
 code { background: rgba(0,0,0,0.05); padding: 1px 4px; border-radius: 3px; font: 12px/1 'JetBrains Mono', ui-monospace, monospace; }
+
+.eager-card {
+  padding: 16px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  background: #fff;
+  color: #1a1a1a;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.eager-card:hover { border-color: rgba(34, 197, 94, 0.4); }
+.eager-card-active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+.eager-label { font: 600 14px/1.2 system-ui, sans-serif; margin-top: 6px; }
+.eager-caption {
+  font: 12px/1.4 system-ui, sans-serif;
+  color: #666;
+  margin-top: 2px;
+  text-align: center;
+}
 </style>

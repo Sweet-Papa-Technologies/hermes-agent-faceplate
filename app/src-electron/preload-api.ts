@@ -22,8 +22,6 @@ import type {
   CreateArtifactInput,
 } from '../src/stores/artifact-types';
 
-export type SidecarBuild = 'cpu' | 'cpu-slim' | 'cuda';
-
 export interface HermesCapabilities {
   /** Model id hermes advertises for itself (e.g. `hermes-agent` or a profile name). */
   model?: string;
@@ -54,95 +52,6 @@ export interface HermesLocalConfig {
   };
 }
 
-/** Snapshot of the bundled Kokoro Docker container + endpoint state. The
- * UI uses these four flags to decide which action button to show:
- *   - !docker_available             → "Install Docker first"
- *   - container_state=missing       → "Install + start Kokoro"
- *   - container_state=exited        → "Start Kokoro"
- *   - container_state=running       → "Stop Kokoro"
- *   - reachable && container_state=missing → user runs Kokoro themselves;
- *     hide the lifecycle buttons (we don't own that container). */
-export interface KokoroStatus {
-  docker_available: boolean;
-  container_state: 'running' | 'exited' | 'missing';
-  reachable: boolean;
-  base_url: string;
-}
-
-/** State of the `podman machine` VM. `applicable:false` on Linux, where
- *  Podman is native and no VM exists. Single source of truth — imported
- *  by podman-machine.ts. */
-export interface PodmanMachineState {
-  applicable: boolean;
-  exists: boolean;
-  running: boolean;
-  name: string;
-}
-
-/** Snapshot the Settings → Podman panel polls. */
-export interface PodmanStatus {
-  platform: 'darwin' | 'win32' | 'linux';
-  /** Resolved container engine. M1 default 'docker' (env-overridable);
-   *  the persisted selector lands in M5. */
-  engine: string;
-  installed: boolean;
-  version: string | null;
-  /** null when Podman isn't installed. */
-  machine: PodmanMachineState | null;
-  /** engine===podman && installed && (Linux || machine running). */
-  ready: boolean;
-}
-
-export interface PodmanInstallResult {
-  ok: boolean;
-  steps: string[];
-  /** Linux: the exact `sudo` command for the user to run themselves. */
-  manual_command?: string;
-  /** macOS/Windows fallback: where to get the official installer. */
-  help_url?: string;
-  error?: string;
-}
-
-/** Legacy Docker containers found during the Podman migration. */
-export interface LegacyDockerScan {
-  docker_available: boolean;
-  containers: Array<{ name: string; image: string; state: string }>;
-}
-
-export interface LegacyOffboardResult {
-  removed: string[];
-  failed: Array<{ name: string; error: string }>;
-}
-
-/** App-managed Hermes Agent container state (hermes-lifecycle.ts). */
-export interface HermesAgentStatus {
-  engine: string;
-  engine_available: boolean;
-  container_state: 'running' | 'exited' | 'missing';
-  /** /v1/health answered — true even for a bring-your-own Hermes the app
-   *  doesn't manage. */
-  reachable: boolean;
-  base_url: string;
-  /** The browser-augmented local image exists. */
-  image_built: boolean;
-}
-
-export interface HermesAgentInstallResult {
-  ok: boolean;
-  steps: string[];
-  status: HermesAgentStatus | null;
-  error?: string;
-}
-
-/** Streamed install progress.
- *  - `step`   : a milestone — append to the visible list.
- *  - `status` : transient sub-progress (live pull/build/poll line) —
- *               replace the single current-step label only, never append. */
-export interface HermesInstallProgress {
-  kind: 'step' | 'status';
-  message: string;
-}
-
 /** Frame shape pushed by the Hermes faceplate plugin's WebSocket server.
  * Mirrors hermes-plugin/faceplate/adapter.py's send-side JSON. */
 export interface AgentPushFrame {
@@ -159,6 +68,10 @@ export interface AgentPushStatus {
   connected: boolean;
   url: string;
   last_error: string | null;
+  /** A short, actionable explanation of `last_error` — set when we can
+   *  recognise the failure mode (e.g. ECONNREFUSED on a localhost URL while
+   *  Hermes is in Docker). UI surfaces this above the raw error. */
+  last_error_hint: string | null;
   last_frame_at: number | null;
 }
 
@@ -176,23 +89,13 @@ export interface AgentPushInstallPreview {
   /** Vars we'll APPEND if missing. We never overwrite existing values
    *  (in case the user has a custom port / shared secret already). */
   env_additions: Array<{ key: string; value: string; already_set: boolean }>;
-  /** Hermes Docker container we'd offer to restart after the copy, if we
-   *  can find a likely match. Null = ask the user to restart manually. */
-  hermes_container: HermesContainerCandidate | null;
-}
-
-export interface HermesContainerCandidate {
-  /** Container name (what you pass to `docker restart`). */
-  name: string;
-  /** Image tag we matched against (for the UI to show in the confirm
-   *  dialog so the user can sanity-check we picked the right one). */
-  image: string;
-  /** 'running' | 'exited' | other docker states. We only ever restart
-   *  containers in the 'running' state — exited ones get a `docker start`. */
-  state: string;
-  /** True if more than one container matched our heuristic. The UI should
-   *  show a "this might not be the right one — verify name" caveat. */
-  ambiguous: boolean;
+  /** True if the configured Hermes base_url points away from localhost — a
+   *  strong signal that Hermes runs in Docker or on another machine, in which
+   *  case writing to the host's ~/.hermes/ alone won't suffice. UI surfaces
+   *  a warning + a pointer to setup/hermes-faceplate-plugin.sh. */
+  hermes_likely_remote: boolean;
+  /** The base_url the heuristic looked at, for the warning copy. */
+  hermes_base_url: string;
 }
 
 export interface AgentPushInstallResult {
@@ -200,17 +103,8 @@ export interface AgentPushInstallResult {
   /** Same key the renderer should now show in the FACEPLATE_API_KEY field.
    *  Either freshly generated or read back from a pre-existing .env entry. */
   api_key: string;
-  /** Container suggestion (post-install — same shape as preview). */
-  hermes_container: HermesContainerCandidate | null;
   /** Human-readable summary lines for a "what happened" banner. */
   steps: string[];
-  error?: string;
-}
-
-export interface RestartHermesResult {
-  ok: boolean;
-  /** Name of the container we restarted (echo-back for the UI toast). */
-  container: string;
   error?: string;
 }
 
@@ -259,14 +153,43 @@ export type ConnectionTarget = 'agent' | 'llm' | 'tts' | 'asr' | 'paraphrase';
 
 export interface ParaphraseResult {
   text: string;
-  used: 'reuse_hermes_llm' | 'local_litert' | 'disabled' | 'skipped';
+  used: 'reuse_hermes_llm' | 'disabled' | 'skipped';
   latency_ms: number;
   /**
-   * When `used` does not match the user's preferred mode, this explains why
-   * we re-routed. Set when `reuse_hermes_llm` is unavailable (no local
-   * config / unreachable provider) and we fell through to local_litert.
+   * When `used` does not match the user's preferred mode, this explains why:
+   * `reuse_hermes_llm` was unavailable (no local config / unreachable
+   * provider), so paraphrase was skipped and the full text is spoken.
    */
   fallback_reason?: 'unsafe_to_bypass' | 'unreachable' | 'no_endpoint';
+}
+
+/** Result of a paraphrase round-trip probe — used by Settings → Voice to
+ *  tell the user *why* paraphrase isn't producing summaries, without
+ *  waiting for the next long assistant reply. Mirrors TestResult plus
+ *  details readers want: the resolved endpoint and a short hint. */
+export interface ParaphraseProbeResult {
+  ok: boolean;
+  /** Endpoint that was actually called (LLM base_url derived from local
+   *  hermes config), or '' when nothing was discovered. */
+  endpoint: string;
+  /** Model id sent in the test request, when one was resolved. */
+  model: string;
+  latency_ms: number;
+  /** Output paraphrase text (truncated to ~120 chars) when ok. */
+  sample?: string;
+  /** Failure category — UI maps these to friendly captions. */
+  reason?:
+    | 'disabled'
+    | 'no_local_config'
+    | 'no_model'
+    | 'unreachable'
+    | 'auth'
+    | 'http'
+    | 'empty'
+    | 'timeout'
+    | 'unknown';
+  /** Raw underlying error message (developer-grade). */
+  error?: string;
 }
 
 export interface HookPreview {
@@ -303,8 +226,11 @@ export interface TestResult {
 
 export interface SidecarStatus {
   up: boolean;
-  build: SidecarBuild;
-  /** Configured sidecar base URL (shown as a chip in the wizard). */
+  /** Build tag the sidecar reports in /health (e.g. "cpu", "cuda", or
+   * whatever a native/external sidecar advertises). Empty string when
+   * unreachable. */
+  build: string;
+  /** Configured sidecar base URL (shown as a chip in the UI). */
   url: string;
   models?: Record<string, 'loaded' | 'idle' | 'error'>;
   ram_mb?: number;
@@ -340,20 +266,12 @@ export interface FaceplatePreload {
     discoverConfig(): Promise<HermesDiscovery>;
     testConnection(target: ConnectionTarget): Promise<TestResult>;
     paraphrase(text: string): Promise<ParaphraseResult>;
+    /** Round-trip probe — POSTs a tiny test prompt to the resolved LLM
+     *  endpoint and reports back with a categorized reason on failure. */
+    paraphraseProbe(): Promise<ParaphraseProbeResult>;
     hookPreview(): Promise<HookPreview>;
     hookInstall(): Promise<HookInstallResult>;
     hookUninstall(): Promise<HookInstallResult>;
-    /** App-managed Hermes Agent container (M3). */
-    agentStatus(): Promise<HermesAgentStatus>;
-    /** One-click install: pull base → build browser image → run →
-     *  health-poll. Long-running (~6 GB image on first call). */
-    installAgent(): Promise<HermesAgentInstallResult>;
-    /** Remove the managed container (data volume ~/.hermes preserved). */
-    stopAgent(): Promise<HermesAgentStatus>;
-    /** Subscribe to live install progress lines while `installAgent()`
-     *  runs (pull/build/create/health can take minutes). Returns an
-     *  unsubscribe fn. */
-    onAgentInstallProgress(cb: (p: HermesInstallProgress) => void): () => void;
   };
   window: {
     setClickThrough(enabled: boolean): Promise<void>;
@@ -393,8 +311,6 @@ export interface FaceplatePreload {
   };
   sidecar: {
     status(): Promise<SidecarStatus>;
-    start(): Promise<void>;
-    stop(): Promise<void>;
   };
   themes: {
     list(): Promise<ThemeListing[]>;
@@ -434,42 +350,9 @@ export interface FaceplatePreload {
      *  dialog before any disk write. */
     installPreview(): Promise<AgentPushInstallPreview>;
     /** Perform the install: copy the plugin, append missing env vars,
-     *  generate FACEPLATE_API_KEY if needed, write it into settings. Does
-     *  NOT restart the Hermes container — that's a separate explicit step. */
+     *  generate FACEPLATE_API_KEY if needed, write it into settings. After
+     *  this, restart the Hermes gateway so the plugin loader picks it up. */
     install(): Promise<AgentPushInstallResult>;
-    /** Restart a specific Hermes Docker container. Caller passes the
-     *  container name verified by the user in a confirm dialog. */
-    restartHermes(containerName: string): Promise<RestartHermesResult>;
-  };
-  kokoro: {
-    /** Lightweight status snapshot. Used by the Kokoro engine card to
-     * decide whether to show "Install + start", "Start", or "Stop". */
-    status(): Promise<KokoroStatus>;
-    /** One-click "make Kokoro work" — pulls the image if missing, starts
-     * the container, polls until /v1/voices answers. Long-running
-     * (image pull is ~340 MB on first call). Throws on Docker missing
-     * or container failure to come up. */
-    ensure(): Promise<KokoroStatus>;
-    /** Stop the container without removing it. Idempotent. */
-    stop(): Promise<KokoroStatus>;
-  };
-  podman: {
-    /** Detection + machine state. Safe to poll on panel mount. */
-    status(): Promise<PodmanStatus>;
-    /** Guided install (Homebrew on macOS, winget on Windows; Linux
-     *  returns a manual `sudo` command — never auto-escalates). */
-    install(): Promise<PodmanInstallResult>;
-    /** Ensure the `podman machine` VM exists + is running (macOS/Win).
-     *  Long-running on first init (~1 GB image). Linux → no-op. */
-    ensureMachine(): Promise<PodmanMachineState>;
-    /** Stop the VM (explicit user action). */
-    stopMachine(): Promise<PodmanMachineState>;
-    /** Migration: list leftover Docker containers (hermes-personal,
-     *  faceplate-sidecar, …) that would clash on ports. */
-    legacyScan(): Promise<LegacyDockerScan>;
-    /** Migration: `docker rm -f` the named legacy containers (confirm-
-     *  gated in the UI; only known names are honored). */
-    offboardLegacy(names: string[]): Promise<LegacyOffboardResult>;
   };
   notify: {
     /** Fire an OS notification. The main process gates on settings
@@ -571,14 +454,10 @@ export const IPC = {
     discover: 'faceplate:hermes:discover',
     test: 'faceplate:hermes:test',
     paraphrase: 'faceplate:hermes:paraphrase',
+    paraphraseProbe: 'faceplate:hermes:paraphrase-probe',
     hookPreview: 'faceplate:hermes:hook-preview',
     hookInstall: 'faceplate:hermes:hook-install',
     hookUninstall: 'faceplate:hermes:hook-uninstall',
-    agentStatus: 'faceplate:hermes:agent-status',
-    agentInstall: 'faceplate:hermes:agent-install',
-    agentStop: 'faceplate:hermes:agent-stop',
-    /** main → renderer: streamed install progress lines. */
-    agentInstallProgress: 'faceplate:hermes:agent-install-progress',
   },
   window: {
     setClickThrough: 'faceplate:window:set-click-through',
@@ -604,8 +483,6 @@ export const IPC = {
   // methods for the v2 Capacitor port.
   sidecar: {
     status: 'faceplate:sidecar:status',
-    start: 'faceplate:sidecar:start',
-    stop: 'faceplate:sidecar:stop',
   },
   themes: {
     list: 'faceplate:themes:list',
@@ -629,30 +506,6 @@ export const IPC = {
     installPreview: 'faceplate:agent-push:install-preview',
     /** renderer → main: copy plugin + append env vars + generate key. */
     install: 'faceplate:agent-push:install',
-    /** renderer → main: docker restart <name>. */
-    restartHermes: 'faceplate:agent-push:restart-hermes',
-  },
-  kokoro: {
-    /** Status of the bundled Kokoro Docker container + reachability. */
-    status: 'faceplate:kokoro:status',
-    /** Pull (if missing) + start the container, then poll until ready. */
-    ensure: 'faceplate:kokoro:ensure',
-    /** Stop (but keep) the container — next ensure() will `docker start`. */
-    stop: 'faceplate:kokoro:stop',
-  },
-  podman: {
-    /** renderer → main: detection + machine state. */
-    status: 'faceplate:podman:status',
-    /** renderer → main: guided Podman install. */
-    install: 'faceplate:podman:install',
-    /** renderer → main: ensure the podman machine VM is up. */
-    ensureMachine: 'faceplate:podman:ensure-machine',
-    /** renderer → main: stop the podman machine VM. */
-    stopMachine: 'faceplate:podman:stop-machine',
-    /** renderer → main: scan for leftover Docker containers. */
-    legacyScan: 'faceplate:podman:legacy-scan',
-    /** renderer → main: remove named legacy Docker containers. */
-    offboardLegacy: 'faceplate:podman:offboard-legacy',
   },
   platform: {
     accessibilityTrusted: 'faceplate:platform:accessibility-trusted',

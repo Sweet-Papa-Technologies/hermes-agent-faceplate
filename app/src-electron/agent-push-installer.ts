@@ -1,34 +1,36 @@
-// One-click installer for the Hermes-side `faceplate` plugin.
+// In-app installer for the Hermes-side `faceplate` plugin — for the case
+// where Hermes runs on this machine, so `~/.hermes` is on the local
+// filesystem. For a remote Hermes, run `setup/hermes-faceplate-plugin.sh`
+// on the Hermes host instead (same effect), then point Settings at the
+// printed WebSocket URL.
 //
-// Replaces the manual steps documented in hermes-plugin/README.md with three
-// IPC handlers the Settings UI can drive:
+// Two IPC handlers the Settings UI drives:
 //
 //   1. installPreview() — read-only inspection. Reports which files would
-//      change, which env vars would be appended, and (best-effort) which
-//      Docker container looks like a running Hermes. UI shows this in a
+//      change and which env vars would be appended. UI shows this in a
 //      confirm dialog before any disk write.
 //
 //   2. install() — copy `hermes-plugin/faceplate/` into `~/.hermes/plugins/`,
 //      append FACEPLATE_API_KEY / FACEPLATE_HOME_CHANNEL / FACEPLATE_PORT to
 //      `~/.hermes/.env` IFF they're missing (never clobber a user-set value),
 //      generate a random key if one wasn't already there, and write that key
-//      into Faceplate's own settings so the WebSocket can connect.
+//      into Faceplate's own settings so the WebSocket can connect. The user
+//      then restarts their Hermes gateway so the plugin loader picks it up.
 //
-//   3. restartHermes(name) — `docker restart <name>` against a container the
-//      user has explicitly confirmed in the UI. Surfaces the same error
-//      diagnoser as kokoro-lifecycle for clearer messages on Docker hiccups.
-//
-// Side-effect-free aside from the explicit write phase in install() and the
-// docker call in restartHermes(). installPreview is safe to call on every
-// settings panel mount; both install + restartHermes are idempotent.
+// Side-effect-free aside from the explicit write phase in install().
+// installPreview is safe to call on every settings panel mount; install is
+// idempotent.
 
 import { app, ipcMain } from 'electron';
+import { execFile } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { runEngine, ensureRuntime, type EngineRun } from './container-runtime';
+const execFileP = promisify(execFile);
+
 import {
   hermesHome,
   envPath,
@@ -40,10 +42,8 @@ import {
   IPC,
   type AgentPushInstallPreview,
   type AgentPushInstallResult,
-  type HermesContainerCandidate,
-  type RestartHermesResult,
 } from './preload-api';
-import { applyPatch } from './settings-store';
+import { applyPatch, getSettings } from './settings-store';
 
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -82,82 +82,21 @@ function pluginSrcDir(): string {
 
 // .env parse/read/append/atomicWrite now imported from hermes-env.ts.
 
-// ── docker discovery ───────────────────────────────────────────────────
-
-/** Heuristic match: anything whose name OR image contains a known Hermes
- *  string, ranked so 'hermes-agent' / 'tirith' beat looser matches. */
-const HERMES_MATCHERS: Array<{ pattern: RegExp; priority: number }> = [
-  { pattern: /hermes-agent/i, priority: 100 },
-  { pattern: /\btirith\b/i, priority: 90 },
-  { pattern: /\bhermes\b/i, priority: 50 },
-];
-
-function scoreMatch(name: string, image: string): number {
-  const haystack = `${name} ${image}`;
-  let best = 0;
-  for (const { pattern, priority } of HERMES_MATCHERS) {
-    if (pattern.test(haystack) && priority > best) best = priority;
-  }
-  return best;
-}
-
-async function findHermesContainer(): Promise<HermesContainerCandidate | null> {
-  let result: EngineRun;
+/** Heuristic: does `hermes.base_url` look like it points away from this host?
+ *  We treat anything that isn't loopback as "likely remote/Docker" — both
+ *  cases mean writing to the host's ~/.hermes/ alone won't make the plugin
+ *  load. (The container can't see host paths unless bind-mounted; a remote
+ *  Hermes can't see this machine's filesystem at all.) Returning true only
+ *  surfaces a warning; it doesn't block install. */
+function hermesLikelyRemote(baseUrl: string): boolean {
   try {
-    // Format: "name<TAB>image<TAB>state". `-a` so we also pick up stopped
-    // containers — they're valid restart targets if the user previously
-    // stopped Hermes.
-    result = await runEngine(
-      ['ps', '-a', '--format', '{{.Names}}\t{{.Image}}\t{{.State}}'],
-      { timeoutMs: 15_000 },
-    );
+    const h = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || h === '::1') return false;
+    if (/^127\./.test(h)) return false;
+    return true;
   } catch {
-    return null;
+    return false;
   }
-  if (result.code !== 0) return null;
-  const candidates: Array<{ name: string; image: string; state: string; score: number }> = [];
-  for (const line of result.stdout.split(/\r?\n/)) {
-    const cleaned = line.trim();
-    if (!cleaned) continue;
-    const [name, image, state] = cleaned.split('\t');
-    if (!name || !image) continue;
-    const score = scoreMatch(name, image);
-    if (score === 0) continue;
-    candidates.push({ name, image, state: state ?? 'unknown', score });
-  }
-  if (candidates.length === 0) return null;
-  // Prefer running > paused > exited, then by score, then by name (stable).
-  candidates.sort((a, b) => {
-    const stateRank = (s: string): number => (s === 'running' ? 2 : s === 'paused' ? 1 : 0);
-    const sa = stateRank(a.state);
-    const sb = stateRank(b.state);
-    if (sa !== sb) return sb - sa;
-    if (a.score !== b.score) return b.score - a.score;
-    return a.name.localeCompare(b.name);
-  });
-  const pick = candidates[0];
-  if (!pick) return null;
-  return {
-    name: pick.name,
-    image: pick.image,
-    state: pick.state,
-    ambiguous: candidates.length > 1,
-  };
-}
-
-function diagnoseDockerError(action: string, r: EngineRun): string {
-  const blob = `${r.stderr}\n${r.stdout}`.toLowerCase();
-  const tail = (r.stderr || r.stdout).trim().slice(-280);
-  if (blob.includes('cannot connect to the docker daemon') || blob.includes('is the docker daemon running')) {
-    return `${action} failed: Docker daemon is not running. Start Docker Desktop and retry.\n\nRaw error: ${tail}`;
-  }
-  if (blob.includes('no such container')) {
-    return `${action} failed: no container by that name exists anymore. Check \`docker ps -a\`.\n\nRaw error: ${tail}`;
-  }
-  if (blob.includes('permission denied') && blob.includes('docker.sock')) {
-    return `${action} failed: you're not in the docker group. Linux: \`sudo usermod -aG docker $USER\`, log out, log back in.\n\nRaw error: ${tail}`;
-  }
-  return `${action} failed (exit ${r.code}): ${tail}`;
 }
 
 // ── preview ────────────────────────────────────────────────────────────
@@ -177,7 +116,7 @@ export async function previewInstall(): Promise<AgentPushInstallPreview> {
     };
   });
 
-  const hermes = await findHermesContainer();
+  const hermesBaseUrl = getSettings().hermes.base_url;
 
   return {
     plugin_src: src,
@@ -185,7 +124,8 @@ export async function previewInstall(): Promise<AgentPushInstallPreview> {
     plugin_already_present: pluginAlreadyPresent,
     env_path: envPath(),
     env_additions: additions,
-    hermes_container: hermes,
+    hermes_likely_remote: hermesLikelyRemote(hermesBaseUrl),
+    hermes_base_url: hermesBaseUrl,
   };
 }
 
@@ -247,52 +187,92 @@ export async function installPlugin(): Promise<AgentPushInstallResult> {
     });
     steps.push('Wrote FACEPLATE_API_KEY into Faceplate settings and enabled Hermes Pings.');
 
-    // Best-effort container lookup. UI uses this to drive the confirm-and-
-    // restart dialog; null is a valid outcome (user runs Hermes bare-metal
-    // or under a name we don't recognise).
-    const hermes = await findHermesContainer();
-    if (hermes) {
-      steps.push(`Next: restart "${hermes.name}" so the plugin loader picks up the new folder.`);
-    } else {
-      steps.push('Next: restart Hermes manually so the plugin loader picks up the new folder.');
+    // Seed ~/.hermes/channel_directory.json with the faceplate home
+    // channel so `hermes send --to faceplate:<id>` resolves. Without
+    // this, the CLI bails in pre-flight before standalone_sender_fn is
+    // ever consulted (it only auto-accepts numeric IDs for unknown
+    // platforms). Best-effort: failure here doesn't block install.
+    try {
+      const { readFileSync, writeFileSync } = await import('node:fs');
+      const chanPath = path.join(hermesHome(), 'channel_directory.json');
+      let directory: { platforms?: Record<string, Array<Record<string, string>>>; updated_at?: string } = { platforms: {} };
+      if (existsSync(chanPath)) {
+        try {
+          directory = JSON.parse(readFileSync(chanPath, 'utf8'));
+        } catch {
+          /* corrupt file — overwrite with our minimal shape */
+          directory = { platforms: {} };
+        }
+      }
+      directory.platforms = directory.platforms ?? {};
+      const fp = directory.platforms.faceplate ?? [];
+      const chanId =
+        readEnvFile().vars.FACEPLATE_HOME_CHANNEL ?? 'default';
+      const entry = { id: chanId, name: chanId, type: 'dm' };
+      const exists = fp.some((e) => e.id === entry.id && e.name === entry.name);
+      if (!exists) fp.push(entry);
+      directory.platforms.faceplate = fp;
+      directory.updated_at = new Date().toISOString();
+      writeFileSync(chanPath, JSON.stringify(directory, null, 2));
+      steps.push(`Seeded channel_directory.json with faceplate:${chanId}.`);
+    } catch (err) {
+      steps.push(
+        `Could not seed channel_directory.json (non-fatal — \`hermes send --to faceplate:${'<id>'}\` will only accept numeric IDs until you seed it manually). Detail: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
-    return { ok: true, api_key: apiKey, hermes_container: hermes, steps };
+    // Enable the plugin via `hermes plugins enable faceplate`. Hermes
+    // ships user plugins **disabled** by default, so without this the
+    // gateway sees the files + env vars but never spins the adapter up —
+    // the symptom is "ECONNREFUSED 127.0.0.1:8643" forever even after a
+    // gateway restart. Best-effort: if the CLI isn't on PATH (packaged
+    // builds may not inherit the user's shell PATH) we surface the
+    // command the user should run themselves.
+    try {
+      // Common Homebrew + uv-tools install locations on macOS/Linux, then
+      // the inherited PATH. Avoids the packaged-Electron PATH gotcha where
+      // Cmd-launched apps don't see ~/.local/bin or /opt/homebrew/bin.
+      const extraPath = [
+        path.join(process.env.HOME ?? '', '.local', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+      ].filter(Boolean).join(path.delimiter);
+      const env = {
+        ...process.env,
+        PATH: `${extraPath}${path.delimiter}${process.env.PATH ?? ''}`,
+      };
+      const { stdout } = await execFileP('hermes', ['plugins', 'enable', 'faceplate'], {
+        env,
+        timeout: 15_000,
+      });
+      const trimmed = stdout.trim();
+      steps.push(
+        `Enabled the plugin (hermes plugins enable faceplate)${trimmed ? `: ${trimmed.slice(0, 160)}` : ''}.`,
+      );
+    } catch (err) {
+      steps.push(
+        'Could not run `hermes plugins enable faceplate` automatically ' +
+          '(hermes CLI not on this app\'s PATH, or it returned non-zero). ' +
+          'Open a terminal and run: `hermes plugins enable faceplate` — ' +
+          'without it, Hermes will see the plugin in `hermes plugins list` ' +
+          'but won\'t start its adapter on boot. ' +
+          `(detail: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)})`,
+      );
+    }
+
+    steps.push(
+      'Next: restart your Hermes gateway so the plugin loader picks up the new folder.',
+    );
+
+    return { ok: true, api_key: apiKey, steps };
   } catch (err) {
     return {
       ok: false,
       api_key: '',
-      hermes_container: null,
       steps,
       error: err instanceof Error ? err.message : String(err),
     };
   }
-}
-
-// ── restart ────────────────────────────────────────────────────────────
-
-export async function restartHermesContainer(name: string): Promise<RestartHermesResult> {
-  // Reject obvious garbage early — docker is forgiving but we don't want
-  // to spawn a process for empty strings or paths.
-  if (!name || /[\s/\\]/.test(name)) {
-    return { ok: false, container: name, error: 'invalid container name' };
-  }
-  let run: EngineRun;
-  try {
-    // No-op under docker (M1 default) / Linux; ensures the podman VM is up.
-    await ensureRuntime();
-    run = await runEngine(['restart', name], { timeoutMs: 60_000 });
-  } catch (err) {
-    return {
-      ok: false,
-      container: name,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-  if (run.code !== 0) {
-    return { ok: false, container: name, error: diagnoseDockerError('docker restart', run) };
-  }
-  return { ok: true, container: name };
 }
 
 // ── IPC registration ───────────────────────────────────────────────────
@@ -300,7 +280,4 @@ export async function restartHermesContainer(name: string): Promise<RestartHerme
 export function registerAgentPushInstallerIpc(): void {
   ipcMain.handle(IPC.agentPush.installPreview, () => previewInstall());
   ipcMain.handle(IPC.agentPush.install, () => installPlugin());
-  ipcMain.handle(IPC.agentPush.restartHermes, (_evt, name: string) =>
-    restartHermesContainer(name),
-  );
 }

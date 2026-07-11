@@ -3,25 +3,16 @@
 //
 // Routing:
 //
-//   settings.paraphrase.model === 'local_litert' (default):
-//     POST to settings.paraphrase.litert_lm_url + '/responses' (default
-//     http://127.0.0.1:7860/v1/responses) — the host-native `litert-lm serve
-//     --api openai` started by `make litert-up`. As of litert-lm 0.11 the
-//     OpenAI-compatible mode only implements the **Responses API**, not Chat
-//     Completions, so the wire format is { model, input, max_output_tokens }
-//     and we read text from output[].content[].text.
-//
-//   settings.paraphrase.model === 'reuse_hermes_llm':
+//   settings.paraphrase.model === 'reuse_hermes_llm' (default):
 //     POST direct to the discovered LLM endpoint (read from local
 //     ~/.hermes/config.yaml + .env). Bypasses hermes-agent entirely.
-//     This path keeps the Chat Completions shape because real backends
-//     (OpenAI, OpenRouter, Ollama, Anthropic) all speak it. If local
-//     config isn't readable (Docker / remote hermes), fall through to
-//     local_litert with `fallback_reason: 'unsafe_to_bypass'`.
+//     Real backends (OpenAI, OpenRouter, Ollama, Anthropic) all speak the
+//     Chat Completions shape. If local config isn't readable (Docker /
+//     remote hermes), paraphrase is skipped and the full text is spoken.
 //
-//     We do NOT route through hermes-agent's /v1/chat/completions in this
-//     case — that endpoint runs the full agent loop (memory + tools + skills)
-//     per https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server
+//     We do NOT route through hermes-agent's /v1/chat/completions — that
+//     endpoint runs the full agent loop (memory + tools + skills) per
+//     https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server
 //     and would corrupt session memory.
 //
 //   settings.paraphrase.model === 'disabled':
@@ -29,7 +20,7 @@
 
 import { ipcMain, net } from 'electron';
 
-import { IPC, type ParaphraseResult } from './preload-api';
+import { IPC, type ParaphraseProbeResult, type ParaphraseResult } from './preload-api';
 import { getSettings } from './settings-store';
 import { readLlmEndpoint } from './hermes-discovery';
 
@@ -46,12 +37,6 @@ const PARAPHRASE_TRUNCATE_MARKER = '\n\n[reply continues — summarize the gist 
 // failure signal and fall back to the original text.
 const CANNED_FAILURE_RE =
   /\b(please\s+(say|provide|give|tell|share)|smiley\s+face|how\s+can\s+i\s+(assist|help)|i'?m\s+sorry,?\s*(but|i)|i\s+don'?t\s+understand)\b/i;
-// Default model id we send to litert-lm. The serve endpoint switches engines
-// per `model_id`, so this must match what `make litert-up` imported. Default
-// matches DESIGN-ADDENDUM-01 §4 (Gemma 4 E2B IT). Override
-// LITERT_MODEL/LITERT_HF_REPO/LITERT_HF_FILE in the environment to swap.
-const LITERT_DEFAULT_MODEL = 'gemma-4-E2B-it';
-
 interface ChatMessage {
   role: 'system' | 'user';
   content: string;
@@ -116,10 +101,10 @@ async function postJson(
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  // Loopback / private LAN (host-native litert-lm, LAN LLMs reachable from
-  // hermes config) bypass Chromium's net stack so we skip system PAC files
-  // that swallow private-network traffic. Public URLs go through
-  // electron.net.fetch to follow the system cert store + proxy.
+  // Loopback / private LAN (LAN LLMs reachable from hermes config) bypass
+  // Chromium's net stack so we skip system PAC files that swallow
+  // private-network traffic. Public URLs go through electron.net.fetch to
+  // follow the system cert store + proxy.
   const doFetch = isLocalNetwork(url) ? fetch : net.fetch;
   try {
     const res = await doFetch(url, {
@@ -161,39 +146,6 @@ async function postChat(
       `finish_reason=${choice?.finish_reason}. Reasoning model spent the budget thinking — ` +
       `bump max_tokens or set enable_thinking:false on the request.`,
     );
-  }
-  return '';
-}
-
-// litert-lm 0.11 `serve --api openai` exposes the Responses API only.
-// Wire format: { model, input: [{role, content:[{type:'input_text', text}]}], max_output_tokens }.
-// Response shape: { output: [{content: [{type:'output_text', text}]}] }.
-async function postResponses(
-  url: string,
-  apiKey: string | undefined,
-  model: string,
-  messages: ChatMessage[],
-  maxOutputTokens: number,
-  temperature: number,
-): Promise<string> {
-  const body = {
-    model,
-    input: messages.map((m) => ({
-      role: m.role,
-      content: [{ type: m.role === 'system' ? 'input_text' : 'input_text', text: m.content }],
-    })),
-    max_output_tokens: maxOutputTokens,
-    temperature,
-  };
-  const json = (await postJson(url, apiKey, body)) as {
-    output?: Array<{
-      content?: Array<{ type?: string; text?: string }>;
-    }>;
-  };
-  for (const item of json.output ?? []) {
-    for (const part of item.content ?? []) {
-      if (part.type === 'output_text' && part.text) return part.text.trim();
-    }
   }
   return '';
 }
@@ -270,27 +222,6 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
     };
   };
 
-  const tryLitert = async (
-    fallback_reason?: ParaphraseResult['fallback_reason'],
-  ): Promise<ParaphraseResult> => {
-    const url = `${cfg.litert_lm_url.replace(/\/+$/, '')}/responses`;
-    const result = await postResponses(
-      url,
-      undefined,
-      LITERT_DEFAULT_MODEL,
-      messages,
-      Math.max(48, cfg.target_words * 4),
-      0.4,
-    );
-    const sanitized = sanitizeParaphrase(result, text);
-    return {
-      text: sanitized,
-      used: 'local_litert',
-      latency_ms: Date.now() - start,
-      ...(fallback_reason ? { fallback_reason } : {}),
-    };
-  };
-
   const logOutcome = (r: ParaphraseResult): ParaphraseResult => {
     const wordCount = r.text.split(/\s+/).filter(Boolean).length;
     console.log(
@@ -301,26 +232,20 @@ export async function paraphrase(text: string): Promise<ParaphraseResult> {
     return r;
   };
 
-  if (cfg.model === 'reuse_hermes_llm') {
-    try {
-      return logOutcome(await tryHermesLlm());
-    } catch (err) {
-      const reason = err instanceof BypassUnsafeError ? 'unsafe_to_bypass' : 'unreachable';
-      console.warn(`[paraphrase] hermes LLM ${reason}, falling back to local litert-lm:`, err);
-      try {
-        return logOutcome(await tryLitert(reason));
-      } catch (err2) {
-        console.error('[paraphrase] litert-lm also failed:', err2);
-        return { text, used: 'skipped', latency_ms: Date.now() - start };
-      }
-    }
-  }
-  // local_litert (default)
+  // Only reuse_hermes_llm reaches here ('disabled' returned above). Route
+  // straight to the underlying LLM read from local ~/.hermes config — never
+  // through hermes-agent's agent loop, which would corrupt session memory.
   try {
-    return logOutcome(await tryLitert());
+    return logOutcome(await tryHermesLlm());
   } catch (err) {
-    console.error('[paraphrase] litert-lm failed:', err);
-    return { text, used: 'skipped', latency_ms: Date.now() - start };
+    const reason = err instanceof BypassUnsafeError ? 'unsafe_to_bypass' : 'unreachable';
+    console.warn(`[paraphrase] hermes LLM ${reason}, speaking original text:`, err);
+    return logOutcome({
+      text,
+      used: 'skipped',
+      latency_ms: Date.now() - start,
+      fallback_reason: reason,
+    });
   }
 }
 
@@ -390,6 +315,125 @@ class BypassUnsafeError extends Error {
   }
 }
 
+type ProbeReason = NonNullable<ParaphraseProbeResult['reason']>;
+
+/** Reverse-map a low-level postChat/postJson error string into one of the
+ *  ParaphraseProbeResult.reason categories. Order matters — check the
+ *  more specific patterns first. Falls back to 'unknown'. */
+function classifyProbeError(err: string): ProbeReason {
+  const lower = err.toLowerCase();
+  if (lower.includes('http 401') || lower.includes('http 403')) return 'auth';
+  if (lower.match(/http \d{3}/)) return 'http';
+  if (lower.includes('aborted') || lower.includes('timeout')) return 'timeout';
+  if (
+    lower.includes('econnrefused') ||
+    lower.includes('ehostunreach') ||
+    lower.includes('enetunreach') ||
+    lower.includes('enotfound') ||
+    lower.includes('fetch failed')
+  ) {
+    return 'unreachable';
+  }
+  return 'unknown';
+}
+
+/** Probe handler: tries the same code path paraphrase() would take but
+ *  with a fixed tiny prompt, and reports the outcome categorically. Lets
+ *  Settings → Voice show "your LLM at X is unreachable" instead of "we
+ *  just speak the full text and never tell you why". */
+export async function probeParaphrase(): Promise<ParaphraseProbeResult> {
+  const start = Date.now();
+  const cfg = getSettings().paraphrase;
+
+  if (cfg.model === 'disabled' || !cfg.enabled) {
+    return {
+      ok: false,
+      endpoint: '',
+      model: '',
+      latency_ms: 0,
+      reason: 'disabled',
+      error: 'Paraphrase is off in Settings.',
+    };
+  }
+
+  const llm = readLlmEndpoint();
+  if (!llm) {
+    return {
+      ok: false,
+      endpoint: '',
+      model: '',
+      latency_ms: Date.now() - start,
+      reason: 'no_local_config',
+      error:
+        'Local ~/.hermes/ config not readable (Hermes is likely remote or containerised). ' +
+        'Paraphrase via reuse_hermes_llm needs file-system access to the underlying LLM ' +
+        'provider config — point HERMES_HOME at the right directory or run the Faceplate on ' +
+        'the same machine as Hermes.',
+    };
+  }
+  if (!llm.model) {
+    return {
+      ok: false,
+      endpoint: llm.base_url,
+      model: '',
+      latency_ms: Date.now() - start,
+      reason: 'no_model',
+      error: 'Hermes config has no model.default set; nothing to paraphrase against.',
+    };
+  }
+
+  const baseUrl = rewriteDockerHostUrl(llm.base_url);
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const messages: ChatBody['messages'] = [
+    { role: 'system', content: 'Reply with exactly: "ping ok".' },
+    { role: 'user', content: 'ping' },
+  ];
+  try {
+    const out = await postChat(url, llm.api_key, {
+      model: llm.model,
+      messages,
+      max_tokens: 32,
+      temperature: 0,
+      stream: false,
+      enable_thinking: false,
+      reasoning_effort: 'minimal',
+      chat_template_kwargs: { enable_thinking: false },
+    });
+    if (!out) {
+      return {
+        ok: false,
+        endpoint: url,
+        model: llm.model,
+        latency_ms: Date.now() - start,
+        reason: 'empty',
+        error:
+          'LLM responded but content was empty. If this is a reasoning model, it likely spent ' +
+          'the token budget on chain-of-thought — try a non-thinking model for paraphrase.',
+      };
+    }
+    return {
+      ok: true,
+      endpoint: url,
+      model: llm.model,
+      latency_ms: Date.now() - start,
+      sample: out.slice(0, 120),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : '';
+    const combined = cause ? `${message} — ${cause}` : message;
+    return {
+      ok: false,
+      endpoint: url,
+      model: llm.model,
+      latency_ms: Date.now() - start,
+      reason: classifyProbeError(combined),
+      error: combined,
+    };
+  }
+}
+
 export function registerParaphraseIpc(): void {
   ipcMain.handle(IPC.hermes.paraphrase, (_evt, text: string) => paraphrase(text));
+  ipcMain.handle(IPC.hermes.paraphraseProbe, () => probeParaphrase());
 }
