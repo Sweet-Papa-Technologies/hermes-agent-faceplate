@@ -22,10 +22,14 @@
 // idempotent.
 
 import { app, ipcMain } from 'electron';
+import { execFile } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+
+const execFileP = promisify(execFile);
 
 import {
   hermesHome,
@@ -39,7 +43,7 @@ import {
   type AgentPushInstallPreview,
   type AgentPushInstallResult,
 } from './preload-api';
-import { applyPatch } from './settings-store';
+import { applyPatch, getSettings } from './settings-store';
 
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -78,6 +82,23 @@ function pluginSrcDir(): string {
 
 // .env parse/read/append/atomicWrite now imported from hermes-env.ts.
 
+/** Heuristic: does `hermes.base_url` look like it points away from this host?
+ *  We treat anything that isn't loopback as "likely remote/Docker" — both
+ *  cases mean writing to the host's ~/.hermes/ alone won't make the plugin
+ *  load. (The container can't see host paths unless bind-mounted; a remote
+ *  Hermes can't see this machine's filesystem at all.) Returning true only
+ *  surfaces a warning; it doesn't block install. */
+function hermesLikelyRemote(baseUrl: string): boolean {
+  try {
+    const h = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || h === '::1') return false;
+    if (/^127\./.test(h)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── preview ────────────────────────────────────────────────────────────
 
 export async function previewInstall(): Promise<AgentPushInstallPreview> {
@@ -95,12 +116,16 @@ export async function previewInstall(): Promise<AgentPushInstallPreview> {
     };
   });
 
+  const hermesBaseUrl = getSettings().hermes.base_url;
+
   return {
     plugin_src: src,
     plugin_dst: dst,
     plugin_already_present: pluginAlreadyPresent,
     env_path: envPath(),
     env_additions: additions,
+    hermes_likely_remote: hermesLikelyRemote(hermesBaseUrl),
+    hermes_base_url: hermesBaseUrl,
   };
 }
 
@@ -161,6 +186,79 @@ export async function installPlugin(): Promise<AgentPushInstallResult> {
       },
     });
     steps.push('Wrote FACEPLATE_API_KEY into Faceplate settings and enabled Hermes Pings.');
+
+    // Seed ~/.hermes/channel_directory.json with the faceplate home
+    // channel so `hermes send --to faceplate:<id>` resolves. Without
+    // this, the CLI bails in pre-flight before standalone_sender_fn is
+    // ever consulted (it only auto-accepts numeric IDs for unknown
+    // platforms). Best-effort: failure here doesn't block install.
+    try {
+      const { readFileSync, writeFileSync } = await import('node:fs');
+      const chanPath = path.join(hermesHome(), 'channel_directory.json');
+      let directory: { platforms?: Record<string, Array<Record<string, string>>>; updated_at?: string } = { platforms: {} };
+      if (existsSync(chanPath)) {
+        try {
+          directory = JSON.parse(readFileSync(chanPath, 'utf8'));
+        } catch {
+          /* corrupt file — overwrite with our minimal shape */
+          directory = { platforms: {} };
+        }
+      }
+      directory.platforms = directory.platforms ?? {};
+      const fp = directory.platforms.faceplate ?? [];
+      const chanId =
+        readEnvFile().vars.FACEPLATE_HOME_CHANNEL ?? 'default';
+      const entry = { id: chanId, name: chanId, type: 'dm' };
+      const exists = fp.some((e) => e.id === entry.id && e.name === entry.name);
+      if (!exists) fp.push(entry);
+      directory.platforms.faceplate = fp;
+      directory.updated_at = new Date().toISOString();
+      writeFileSync(chanPath, JSON.stringify(directory, null, 2));
+      steps.push(`Seeded channel_directory.json with faceplate:${chanId}.`);
+    } catch (err) {
+      steps.push(
+        `Could not seed channel_directory.json (non-fatal — \`hermes send --to faceplate:${'<id>'}\` will only accept numeric IDs until you seed it manually). Detail: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Enable the plugin via `hermes plugins enable faceplate`. Hermes
+    // ships user plugins **disabled** by default, so without this the
+    // gateway sees the files + env vars but never spins the adapter up —
+    // the symptom is "ECONNREFUSED 127.0.0.1:8643" forever even after a
+    // gateway restart. Best-effort: if the CLI isn't on PATH (packaged
+    // builds may not inherit the user's shell PATH) we surface the
+    // command the user should run themselves.
+    try {
+      // Common Homebrew + uv-tools install locations on macOS/Linux, then
+      // the inherited PATH. Avoids the packaged-Electron PATH gotcha where
+      // Cmd-launched apps don't see ~/.local/bin or /opt/homebrew/bin.
+      const extraPath = [
+        path.join(process.env.HOME ?? '', '.local', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+      ].filter(Boolean).join(path.delimiter);
+      const env = {
+        ...process.env,
+        PATH: `${extraPath}${path.delimiter}${process.env.PATH ?? ''}`,
+      };
+      const { stdout } = await execFileP('hermes', ['plugins', 'enable', 'faceplate'], {
+        env,
+        timeout: 15_000,
+      });
+      const trimmed = stdout.trim();
+      steps.push(
+        `Enabled the plugin (hermes plugins enable faceplate)${trimmed ? `: ${trimmed.slice(0, 160)}` : ''}.`,
+      );
+    } catch (err) {
+      steps.push(
+        'Could not run `hermes plugins enable faceplate` automatically ' +
+          '(hermes CLI not on this app\'s PATH, or it returned non-zero). ' +
+          'Open a terminal and run: `hermes plugins enable faceplate` — ' +
+          'without it, Hermes will see the plugin in `hermes plugins list` ' +
+          'but won\'t start its adapter on boot. ' +
+          `(detail: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)})`,
+      );
+    }
 
     steps.push(
       'Next: restart your Hermes gateway so the plugin loader picks up the new folder.',

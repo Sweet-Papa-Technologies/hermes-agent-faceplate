@@ -45,6 +45,7 @@ const hermes: FaceplatePreload['hermes'] = {
   testConnection: (target: ConnectionTarget) =>
     ipcRenderer.invoke(IPC.hermes.test, target),
   paraphrase: (text: string) => ipcRenderer.invoke(IPC.hermes.paraphrase, text),
+  paraphraseProbe: () => ipcRenderer.invoke(IPC.hermes.paraphraseProbe),
   hookPreview: () => ipcRenderer.invoke(IPC.hermes.hookPreview),
   hookInstall: () => ipcRenderer.invoke(IPC.hermes.hookInstall),
   hookUninstall: () => ipcRenderer.invoke(IPC.hermes.hookUninstall),

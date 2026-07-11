@@ -149,17 +149,17 @@ A Hermes-side plugin that opens a WebSocket the Faceplate subscribes to.
 Every `send_message_tool` call, cron job with `deliver: faceplate`, and
 autonomous fan-out routes through it.
 
-### Local Hermes (same machine)
+### Hermes runs directly on this machine (no sandbox)
 
 In the app: **Settings → Notifications & Pings → Install plugin.** A
 preview dialog shows exactly what files will be touched. Click *Install*.
 Restart your Hermes gateway so the plugin loader picks up the new folder.
 Done.
 
-### Remote Hermes
+### Every other setup (remote, sandboxed, containerised, different user)
 
-SSH to the Hermes host, clone this repo (or just copy `setup/` +
-`hermes-plugin/`), and:
+Run on the machine and under the user that owns the Hermes process. SSH
+to it (or open a shell into the sandbox / container) and:
 
 ```sh
 bash setup/hermes-faceplate-plugin.sh --bind 0.0.0.0 [--port 8643]
@@ -171,10 +171,20 @@ The script:
 2. Appends `FACEPLATE_API_KEY` (random), `FACEPLATE_HOME_CHANNEL=default`,
    `FACEPLATE_PORT`, and `FACEPLATE_BIND` to `~/.hermes/.env` — **never**
    overwriting an existing value.
-3. Prints the WebSocket URL (`ws://<host>:<port>/ws`) + key.
+3. Runs `hermes plugins enable faceplate`. Hermes ships user plugins
+   *disabled* by default — without this step `hermes plugins list`
+   shows the row but the adapter never starts on boot.
+4. Prints the WebSocket URL (`ws://<host>:<port>/ws`) + key.
 
 Restart your Hermes gateway. Then in the Faceplate: **Settings →
-Notifications & Pings → Enable pings** and paste both.
+Notifications & Pings → Enable pings** and paste both. Verify on the
+Hermes side with `hermes plugins list` (the `faceplate` row should say
+*enabled*).
+
+**One thing the Faceplate genuinely can't help with**: the WS port has to
+be reachable from wherever the Faceplate runs. If Hermes lives behind a
+firewall / sandbox / port-restricted runtime, expose the port per that
+runtime's docs. (The Faceplate has no opinion about which runtime.)
 
 ### Testing
 
@@ -287,11 +297,24 @@ download is left as `*.tmp` and the script will retry on next `up`. You
 can also `rm ~/.faceplate/sidecar/voices/*.tmp` and try again.
 
 **Pings WebSocket won't connect.**
-Confirm Hermes was restarted after the plugin install (the plugin loader
-only scans on gateway boot). The plugin's `/health` endpoint should answer
-without auth: `curl http://127.0.0.1:8643/health` → `{"ok": true, ...}`.
-For remote, also check `--bind 0.0.0.0` was passed and the Faceplate's URL
-uses the Hermes host's reachable address (not `127.0.0.1`).
+Three questions, in order:
+
+1. *Is the plugin **enabled**?* On the Hermes host: `hermes plugins list`.
+   The `faceplate` row should say **enabled**. Hermes ships user plugins
+   disabled by default — if it says *not enabled*, run
+   `hermes plugins enable faceplate` and restart the gateway. The setup
+   script + in-app installer both attempt this automatically, but it can
+   fail silently if the `hermes` CLI isn't on the launcher's PATH.
+2. *Is the plugin loaded?* From the Hermes host, hit its `/health`:
+   `curl http://127.0.0.1:8643/health` → `{"ok": true, "subscribers": {...}}`.
+   If this fails *on the Hermes host itself* after #1, check the gateway
+   boot log for a `[faceplate]` line and a `register_platform` error.
+3. *Is the port reachable from the Faceplate-host?* From the Faceplate
+   machine, hit the same URL using the Hermes host's address. If `/health`
+   answers on the Hermes host but not from here, the port is firewalled
+   or sandboxed — open it per your Hermes runtime's docs. The Faceplate
+   has no opinion about how (it's a port-reachability problem, not a
+   Faceplate problem).
 
 ## What's NOT in scope (by design)
 

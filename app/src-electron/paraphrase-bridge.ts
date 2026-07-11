@@ -20,7 +20,7 @@
 
 import { ipcMain, net } from 'electron';
 
-import { IPC, type ParaphraseResult } from './preload-api';
+import { IPC, type ParaphraseProbeResult, type ParaphraseResult } from './preload-api';
 import { getSettings } from './settings-store';
 import { readLlmEndpoint } from './hermes-discovery';
 
@@ -315,6 +315,125 @@ class BypassUnsafeError extends Error {
   }
 }
 
+type ProbeReason = NonNullable<ParaphraseProbeResult['reason']>;
+
+/** Reverse-map a low-level postChat/postJson error string into one of the
+ *  ParaphraseProbeResult.reason categories. Order matters — check the
+ *  more specific patterns first. Falls back to 'unknown'. */
+function classifyProbeError(err: string): ProbeReason {
+  const lower = err.toLowerCase();
+  if (lower.includes('http 401') || lower.includes('http 403')) return 'auth';
+  if (lower.match(/http \d{3}/)) return 'http';
+  if (lower.includes('aborted') || lower.includes('timeout')) return 'timeout';
+  if (
+    lower.includes('econnrefused') ||
+    lower.includes('ehostunreach') ||
+    lower.includes('enetunreach') ||
+    lower.includes('enotfound') ||
+    lower.includes('fetch failed')
+  ) {
+    return 'unreachable';
+  }
+  return 'unknown';
+}
+
+/** Probe handler: tries the same code path paraphrase() would take but
+ *  with a fixed tiny prompt, and reports the outcome categorically. Lets
+ *  Settings → Voice show "your LLM at X is unreachable" instead of "we
+ *  just speak the full text and never tell you why". */
+export async function probeParaphrase(): Promise<ParaphraseProbeResult> {
+  const start = Date.now();
+  const cfg = getSettings().paraphrase;
+
+  if (cfg.model === 'disabled' || !cfg.enabled) {
+    return {
+      ok: false,
+      endpoint: '',
+      model: '',
+      latency_ms: 0,
+      reason: 'disabled',
+      error: 'Paraphrase is off in Settings.',
+    };
+  }
+
+  const llm = readLlmEndpoint();
+  if (!llm) {
+    return {
+      ok: false,
+      endpoint: '',
+      model: '',
+      latency_ms: Date.now() - start,
+      reason: 'no_local_config',
+      error:
+        'Local ~/.hermes/ config not readable (Hermes is likely remote or containerised). ' +
+        'Paraphrase via reuse_hermes_llm needs file-system access to the underlying LLM ' +
+        'provider config — point HERMES_HOME at the right directory or run the Faceplate on ' +
+        'the same machine as Hermes.',
+    };
+  }
+  if (!llm.model) {
+    return {
+      ok: false,
+      endpoint: llm.base_url,
+      model: '',
+      latency_ms: Date.now() - start,
+      reason: 'no_model',
+      error: 'Hermes config has no model.default set; nothing to paraphrase against.',
+    };
+  }
+
+  const baseUrl = rewriteDockerHostUrl(llm.base_url);
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const messages: ChatBody['messages'] = [
+    { role: 'system', content: 'Reply with exactly: "ping ok".' },
+    { role: 'user', content: 'ping' },
+  ];
+  try {
+    const out = await postChat(url, llm.api_key, {
+      model: llm.model,
+      messages,
+      max_tokens: 32,
+      temperature: 0,
+      stream: false,
+      enable_thinking: false,
+      reasoning_effort: 'minimal',
+      chat_template_kwargs: { enable_thinking: false },
+    });
+    if (!out) {
+      return {
+        ok: false,
+        endpoint: url,
+        model: llm.model,
+        latency_ms: Date.now() - start,
+        reason: 'empty',
+        error:
+          'LLM responded but content was empty. If this is a reasoning model, it likely spent ' +
+          'the token budget on chain-of-thought — try a non-thinking model for paraphrase.',
+      };
+    }
+    return {
+      ok: true,
+      endpoint: url,
+      model: llm.model,
+      latency_ms: Date.now() - start,
+      sample: out.slice(0, 120),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : '';
+    const combined = cause ? `${message} — ${cause}` : message;
+    return {
+      ok: false,
+      endpoint: url,
+      model: llm.model,
+      latency_ms: Date.now() - start,
+      reason: classifyProbeError(combined),
+      error: combined,
+    };
+  }
+}
+
 export function registerParaphraseIpc(): void {
   ipcMain.handle(IPC.hermes.paraphrase, (_evt, text: string) => paraphrase(text));
+  ipcMain.handle(IPC.hermes.paraphraseProbe, () => probeParaphrase());
 }

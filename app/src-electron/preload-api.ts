@@ -68,6 +68,10 @@ export interface AgentPushStatus {
   connected: boolean;
   url: string;
   last_error: string | null;
+  /** A short, actionable explanation of `last_error` — set when we can
+   *  recognise the failure mode (e.g. ECONNREFUSED on a localhost URL while
+   *  Hermes is in Docker). UI surfaces this above the raw error. */
+  last_error_hint: string | null;
   last_frame_at: number | null;
 }
 
@@ -85,6 +89,13 @@ export interface AgentPushInstallPreview {
   /** Vars we'll APPEND if missing. We never overwrite existing values
    *  (in case the user has a custom port / shared secret already). */
   env_additions: Array<{ key: string; value: string; already_set: boolean }>;
+  /** True if the configured Hermes base_url points away from localhost — a
+   *  strong signal that Hermes runs in Docker or on another machine, in which
+   *  case writing to the host's ~/.hermes/ alone won't suffice. UI surfaces
+   *  a warning + a pointer to setup/hermes-faceplate-plugin.sh. */
+  hermes_likely_remote: boolean;
+  /** The base_url the heuristic looked at, for the warning copy. */
+  hermes_base_url: string;
 }
 
 export interface AgentPushInstallResult {
@@ -150,6 +161,35 @@ export interface ParaphraseResult {
    * provider), so paraphrase was skipped and the full text is spoken.
    */
   fallback_reason?: 'unsafe_to_bypass' | 'unreachable' | 'no_endpoint';
+}
+
+/** Result of a paraphrase round-trip probe — used by Settings → Voice to
+ *  tell the user *why* paraphrase isn't producing summaries, without
+ *  waiting for the next long assistant reply. Mirrors TestResult plus
+ *  details readers want: the resolved endpoint and a short hint. */
+export interface ParaphraseProbeResult {
+  ok: boolean;
+  /** Endpoint that was actually called (LLM base_url derived from local
+   *  hermes config), or '' when nothing was discovered. */
+  endpoint: string;
+  /** Model id sent in the test request, when one was resolved. */
+  model: string;
+  latency_ms: number;
+  /** Output paraphrase text (truncated to ~120 chars) when ok. */
+  sample?: string;
+  /** Failure category — UI maps these to friendly captions. */
+  reason?:
+    | 'disabled'
+    | 'no_local_config'
+    | 'no_model'
+    | 'unreachable'
+    | 'auth'
+    | 'http'
+    | 'empty'
+    | 'timeout'
+    | 'unknown';
+  /** Raw underlying error message (developer-grade). */
+  error?: string;
 }
 
 export interface HookPreview {
@@ -226,6 +266,9 @@ export interface FaceplatePreload {
     discoverConfig(): Promise<HermesDiscovery>;
     testConnection(target: ConnectionTarget): Promise<TestResult>;
     paraphrase(text: string): Promise<ParaphraseResult>;
+    /** Round-trip probe — POSTs a tiny test prompt to the resolved LLM
+     *  endpoint and reports back with a categorized reason on failure. */
+    paraphraseProbe(): Promise<ParaphraseProbeResult>;
     hookPreview(): Promise<HookPreview>;
     hookInstall(): Promise<HookInstallResult>;
     hookUninstall(): Promise<HookInstallResult>;
@@ -411,6 +454,7 @@ export const IPC = {
     discover: 'faceplate:hermes:discover',
     test: 'faceplate:hermes:test',
     paraphrase: 'faceplate:hermes:paraphrase',
+    paraphraseProbe: 'faceplate:hermes:paraphrase-probe',
     hookPreview: 'faceplate:hermes:hook-preview',
     hookInstall: 'faceplate:hermes:hook-install',
     hookUninstall: 'faceplate:hermes:hook-uninstall',

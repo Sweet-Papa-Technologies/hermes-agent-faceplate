@@ -1,0 +1,23 @@
+# Repo-wide ignores. Per-subtree ignores live in their own .gitignore
+# (see app/.gitignore for the Electron app's specifics).
+
+# OS junk
+.DS_Store
+Thumbs.db
+.thumbs.db
+ehthumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.aider*
+
+# Local env overrides
+.env.local
+.env.local.*

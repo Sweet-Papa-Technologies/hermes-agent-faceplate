@@ -26,9 +26,46 @@ let ws: WebSocket | null = null;
 let reconnectDelay = RECONNECT_INITIAL_MS;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let lastError: string | null = null;
+let lastErrorHint: string | null = null;
 let lastFrameAt: number | null = null;
 let lastTargetUrl = '';
 let stopped = false;
+
+/** Translate raw socket errors into a one-line action the user can take.
+ *  Returns null when the error doesn't match a known pattern. */
+function classifyError(err: string, targetUrl: string): string | null {
+  const lower = err.toLowerCase();
+  let isLocalhost = false;
+  try {
+    const h = new URL(targetUrl).hostname;
+    isLocalhost = h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  } catch {
+    /* leave isLocalhost false */
+  }
+  if (lower.includes('econnrefused')) {
+    if (isLocalhost) {
+      return (
+        'Nothing is listening on 127.0.0.1 here. Most common cause: the ' +
+        'plugin is installed but not enabled. On the Hermes host run ' +
+        '`hermes plugins enable faceplate` then restart the gateway. ' +
+        '(`hermes plugins list` should show faceplate as "enabled".) If ' +
+        'Hermes doesn\'t live on this machine at all, run ' +
+        'setup/hermes-faceplate-plugin.sh on the real Hermes host instead.'
+      );
+    }
+    return 'Connection refused — the Hermes plugin is not answering on that address. On the Hermes host, check `hermes plugins list` shows faceplate as "enabled" and the gateway has been restarted.';
+  }
+  if (lower.includes('ehostunreach') || lower.includes('enetunreach')) {
+    return 'Host unreachable — check your network / firewall to the Hermes machine.';
+  }
+  if (lower.includes('etimedout') || lower.includes('timeout')) {
+    return 'Connection timed out — the Hermes host may be firewalled or down.';
+  }
+  if (lower.includes('unauthorized')) {
+    return 'Auth rejected — the FACEPLATE_API_KEY in Settings does not match the value in the Hermes host\'s ~/.hermes/.env.';
+  }
+  return null;
+}
 
 function broadcastFrame(frame: AgentPushFrame): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -61,6 +98,7 @@ function connect(): void {
   }
   if (!cfg.api_key) {
     lastError = 'no api_key configured';
+    lastErrorHint = 'Run the in-app installer (Settings → Notifications & Pings → Install plugin) or copy FACEPLATE_API_KEY from the Hermes host\'s ~/.hermes/.env.';
     return;
   }
   // Build URL with chat_id query param. Plugin uses '*' to mean "all".
@@ -71,6 +109,7 @@ function connect(): void {
     url = u.toString();
   } catch {
     lastError = `invalid agent_push.url: ${cfg.url}`;
+    lastErrorHint = 'Expected a WebSocket URL like ws://127.0.0.1:8643/ws — fix it in Settings → Notifications & Pings.';
     return;
   }
   lastTargetUrl = url;
@@ -95,6 +134,7 @@ function connect(): void {
     next = new WebSocket(url, { headers });
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
+    lastErrorHint = classifyError(lastError, url);
     console.warn('[agent-push] WebSocket constructor threw:', lastError);
     scheduleReconnect();
     return;
@@ -105,6 +145,7 @@ function connect(): void {
     console.log('[agent-push] connected');
     reconnectDelay = RECONNECT_INITIAL_MS;
     lastError = null;
+    lastErrorHint = null;
   });
 
   next.on('message', (data: WebSocket.RawData) => {
@@ -127,6 +168,7 @@ function connect(): void {
     if (code === 4401 || code === 1008) {
       // Auth failure — don't loop forever bouncing the server.
       lastError = `unauthorized (close ${code})`;
+      lastErrorHint = classifyError('unauthorized', lastTargetUrl);
       return;
     }
     scheduleReconnect();
@@ -134,6 +176,7 @@ function connect(): void {
 
   next.on('error', (err) => {
     lastError = err instanceof Error ? err.message : String(err);
+    lastErrorHint = classifyError(lastError, lastTargetUrl);
     console.warn('[agent-push] socket error:', lastError);
     // 'error' is followed by 'close' which schedules the reconnect.
   });
@@ -159,6 +202,7 @@ export function startAgentPushBridge(): void {
     connected: ws?.readyState === WebSocket.OPEN,
     url: lastTargetUrl || getSettings().agent_push.url,
     last_error: lastError,
+    last_error_hint: lastErrorHint,
     last_frame_at: lastFrameAt,
   }));
 

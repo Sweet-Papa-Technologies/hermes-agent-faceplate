@@ -84,6 +84,56 @@ env_set FACEPLATE_HOME_CHANNEL "default"
 env_set FACEPLATE_PORT         "$port"
 [ "$bind" != "127.0.0.1" ] && env_set FACEPLATE_BIND "$bind"
 
+# ── seed channel directory so `hermes send --to faceplate:<chat_id>` resolves
+# ─────────────────────────────────────────────────────────────────────────
+# Without this, `hermes send`'s pre-flight channel resolver bails before
+# our standalone_sender_fn is even consulted (it only auto-accepts numeric
+# IDs for unknown platforms). Adding the home channel here makes the
+# obvious incantation Just Work; users can still pass arbitrary chat_ids,
+# they just need them to be numeric OR present in this file.
+chan_dir="$hermes_home/channel_directory.json"
+chan_id="$(env_get FACEPLATE_HOME_CHANNEL)"; chan_id="${chan_id:-default}"
+if command -v python3 >/dev/null 2>&1; then
+  python3 - "$chan_dir" "$chan_id" <<'PY' || echo "· channel directory seed skipped (non-fatal)"
+import json, os, sys
+from datetime import datetime
+path, chan_id = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        d = json.load(f)
+except FileNotFoundError:
+    d = {"platforms": {}}
+fp = d.setdefault("platforms", {}).setdefault("faceplate", [])
+entry = {"id": chan_id, "name": chan_id, "type": "dm"}
+if entry not in fp:
+    fp.append(entry)
+d["updated_at"] = datetime.now().isoformat()
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w") as f:
+    json.dump(d, f, indent=2)
+print(f"✓ seeded channel_directory.json with faceplate:{chan_id}")
+PY
+fi
+
+# ── enable the plugin (Hermes ships plugins disabled by default) ─────────
+# Without this, the gateway sees the plugin in `hermes plugins list` but
+# never calls register() / start() on it — files on disk + env vars are
+# necessary but not sufficient.
+if command -v hermes >/dev/null 2>&1; then
+  if hermes plugins enable faceplate >/dev/null 2>&1; then
+    echo "✓ plugin enabled (hermes plugins enable faceplate)"
+  else
+    # Most likely benign — already enabled, or `enable` reports an error on
+    # an already-enabled plugin. Re-run and show the user what happened so
+    # they can decide.
+    echo "· hermes plugins enable faceplate — re-running with output:"
+    hermes plugins enable faceplate || true
+  fi
+else
+  echo "⚠ 'hermes' CLI not on PATH — run this on the Hermes host yourself:"
+  echo "    hermes plugins enable faceplate"
+fi
+
 # Effective values (existing, or what we just appended).
 eff_key="$(env_get FACEPLATE_API_KEY)"
 eff_port="$(env_get FACEPLATE_PORT)"
@@ -91,6 +141,7 @@ eff_bind="$(env_get FACEPLATE_BIND)"; eff_bind="${eff_bind:-127.0.0.1}"
 
 echo
 echo "Next: restart your Hermes gateway so the plugin loader picks it up."
+echo "  (Verify enrollment first: hermes plugins list  →  'faceplate ... enabled')"
 echo
 echo "Then, in the Faceplate → Settings → Notifications & Pings:"
 if [ "$eff_bind" = "127.0.0.1" ]; then

@@ -214,6 +214,49 @@
           <div>Paraphrase responses longer than {{ triggerChars }} characters</div>
           <q-slider v-model="triggerChars" :min="80" :max="800" :step="10" />
         </q-card-section>
+        <q-separator v-if="paraphraseEnabled" />
+        <q-card-section v-if="paraphraseEnabled" class="row items-center q-gutter-sm">
+          <q-btn
+            flat
+            dense
+            no-caps
+            icon="speed"
+            label="Test paraphrase"
+            :loading="probing"
+            @click="runProbe"
+          />
+          <q-chip
+            v-if="probeResult"
+            :color="probeResult.ok ? 'positive' : 'negative'"
+            text-color="white"
+            dense
+          >
+            {{ probeResult.ok ? `ok · ${probeResult.latency_ms}ms` : probeResult.reason }}
+          </q-chip>
+        </q-card-section>
+        <q-card-section v-if="probeResult" class="probe-detail">
+          <div v-if="probeResult.ok">
+            <div><b>Endpoint:</b> <code>{{ probeResult.endpoint }}</code></div>
+            <div><b>Model:</b> <code>{{ probeResult.model }}</code></div>
+            <div v-if="probeResult.sample" class="q-mt-xs">
+              <b>Sample reply:</b> <code>{{ probeResult.sample }}</code>
+            </div>
+          </div>
+          <div v-else>
+            <div v-if="probeResult.endpoint">
+              <b>Tried:</b> <code>{{ probeResult.endpoint }}</code>
+            </div>
+            <div v-if="probeResult.model">
+              <b>Model:</b> <code>{{ probeResult.model }}</code>
+            </div>
+            <div class="q-mt-xs error-line">
+              <q-icon name="error_outline" /> {{ probeResult.error }}
+            </div>
+            <div v-if="probeHint" class="q-mt-xs hint-line">
+              <q-icon name="lightbulb_outline" /> {{ probeHint }}
+            </div>
+          </div>
+        </q-card-section>
       </q-card>
     </template>
   </div>
@@ -225,7 +268,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useSetting } from '../../composables/use-setting';
 import { SYSTEM_DEFAULT_DEVICE } from '../../stores/settings-schema';
 import TestConnectionButton from './TestConnectionButton.vue';
-import type { SidecarStatus } from '../../../src-electron/preload-api';
+import type {
+  ParaphraseProbeResult,
+  SidecarStatus,
+} from '../../../src-electron/preload-api';
 
 // ─── Settings bindings ───────────────────────────────────────────────────
 const enabled = useSetting('speech.enabled');
@@ -246,6 +292,56 @@ const rate = useSetting('speech.tts.rate');
 
 const paraphraseEnabled = useSetting('paraphrase.enabled');
 const triggerChars = useSetting('paraphrase.trigger_chars');
+
+// ─── Paraphrase probe ────────────────────────────────────────────────────
+const probing = ref(false);
+const probeResult = ref<ParaphraseProbeResult | null>(null);
+
+const probeHint = computed(() => {
+  const r = probeResult.value;
+  if (!r || r.ok) return '';
+  switch (r.reason) {
+    case 'no_local_config':
+      return 'No ~/.hermes/ on this machine to read the LLM endpoint from. Paraphrase needs to open a *direct* socket to the LLM (bypassing Hermes\'s agent loop, which would corrupt session memory) — without a local config it cannot. Turn paraphrase off and chat will still work; the full reply will be spoken.';
+    case 'no_model':
+      return 'Hermes config has no `model.default` set. Either set it on the Hermes side, or turn paraphrase off.';
+    case 'unreachable':
+      return 'The LLM endpoint from your Hermes config is not reachable from this machine. Paraphrase opens a *direct* socket to the LLM (to bypass Hermes\'s agent loop, which would corrupt session memory) — so the LLM has to be reachable from here, not just from Hermes. Either turn paraphrase off, or point Hermes at an LLM endpoint this machine can also reach.';
+    case 'auth':
+      return 'The API key in your Hermes config (or provider-specific *_API_KEY in ~/.hermes/.env) is being rejected by the LLM provider. Refresh it there.';
+    case 'http':
+      return 'The LLM provider returned an HTTP error. Check rate limits / model availability.';
+    case 'timeout':
+      return 'The LLM didn\'t answer within 12s — provider overloaded, or the model is too slow for inline paraphrase.';
+    case 'empty':
+      return 'Reasoning models often spend their token budget on chain-of-thought and emit empty content. Use a non-thinking model (or the same model in non-thinking mode) for paraphrase.';
+    case 'disabled':
+      return 'Toggle "Shorten long responses" on first.';
+    default:
+      return '';
+  }
+});
+
+async function runProbe(): Promise<void> {
+  const fp = window.faceplate;
+  if (!fp) return;
+  probing.value = true;
+  probeResult.value = null;
+  try {
+    probeResult.value = await fp.hermes.paraphraseProbe();
+  } catch (err) {
+    probeResult.value = {
+      ok: false,
+      endpoint: '',
+      model: '',
+      latency_ms: 0,
+      reason: 'unknown',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    probing.value = false;
+  }
+}
 
 // ─── Input mode UI ───────────────────────────────────────────────────────
 const firstEnable = ref(false);
@@ -414,6 +510,30 @@ h3 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; color: #555; text-tr
 .muted { color: #666; margin-bottom: 16px; }
 .card { margin-bottom: 16px; border-radius: 10px; }
 .warn { background: rgba(245, 158, 11, 0.12); border-radius: 8px; }
+
+.probe-detail { font: 12px/1.5 system-ui, sans-serif; color: #333; }
+.probe-detail code {
+  background: rgba(0,0,0,0.06);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font: 11px/1.4 'JetBrains Mono', ui-monospace, monospace;
+}
+.error-line {
+  display: flex; gap: 6px; align-items: flex-start;
+  color: #c62828;
+  font: 12px/1.4 'JetBrains Mono', ui-monospace, monospace;
+}
+.error-line .q-icon { font-size: 14px; flex: none; margin-top: 1px; }
+.hint-line {
+  display: flex; gap: 6px; align-items: flex-start;
+  padding: 8px 10px;
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  color: #7c4a03;
+  font: 12px/1.5 system-ui, sans-serif;
+}
+.hint-line .q-icon { font-size: 16px; flex: none; margin-top: 1px; color: #b8860b; }
 
 .mode-card {
   flex: 1;

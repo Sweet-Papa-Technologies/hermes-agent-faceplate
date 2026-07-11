@@ -200,6 +200,9 @@
             Last ping {{ formatRel(status.last_frame_at) }}
           </q-chip>
         </div>
+        <div v-if="status?.last_error_hint" class="hint-line q-mt-sm">
+          <q-icon name="lightbulb_outline" /> {{ status.last_error_hint }}
+        </div>
         <div v-if="status?.last_error" class="error-line q-mt-sm">
           <q-icon name="error_outline" /> {{ status.last_error }}
         </div>
@@ -363,6 +366,26 @@ function formatRel(ts: number): string {
 
 function summarisePreview(p: AgentPushInstallPreview): string {
   const lines: string[] = [];
+  if (p.hermes_likely_remote) {
+    lines.push('⚠  This button only fits one case: Hermes runs directly on THIS');
+    lines.push('   machine, reading THIS user\'s ~/.hermes/. Your Hermes is');
+    lines.push('   configured at:');
+    lines.push('');
+    lines.push(`     ${p.hermes_base_url}`);
+    lines.push('');
+    lines.push('   For any setup where Hermes lives somewhere else, run this on');
+    lines.push('   the Hermes host instead:');
+    lines.push('');
+    lines.push('     bash setup/hermes-faceplate-plugin.sh --bind 0.0.0.0');
+    lines.push('');
+    lines.push('   It prints the WebSocket URL + key for you to paste into this');
+    lines.push('   panel. The Faceplate doesn\'t care what runtime is on the other');
+    lines.push('   side — only that the port is reachable.');
+    lines.push('');
+    lines.push('   --- cancel below unless you really do want to write into this');
+    lines.push('   --- user\'s local ~/.hermes/ ---');
+    lines.push('');
+  }
   lines.push(`Plugin → ${p.plugin_dst}`);
   if (p.plugin_already_present) {
     lines.push('  (already present — files will be overwritten with the bundled version)');
@@ -375,7 +398,14 @@ function summarisePreview(p: AgentPushInstallPreview): string {
     else lines.push(`  ${a.key}: will set to "${a.value}"`);
   }
   lines.push('');
-  lines.push('After install, restart your Hermes gateway so the plugin loader picks up the new folder.');
+  lines.push('Also run (or this installer will try to do it for you):');
+  lines.push('    hermes plugins enable faceplate');
+  lines.push('Hermes ships user plugins disabled by default — without enabling,');
+  lines.push('it sees the files but never starts the adapter.');
+  lines.push('');
+  lines.push('After install + enable, restart your Hermes gateway so the loader');
+  lines.push('picks up the new folder. The plugin opens a WebSocket on port');
+  lines.push('FACEPLATE_PORT (default 8643); the Faceplate connects to it.');
   return lines.join('\n');
 }
 
@@ -449,6 +479,18 @@ h3 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; color: #555; text-tr
 
 .status-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .error-line { color: #c62828; font: 12px/1.4 'JetBrains Mono', ui-monospace, monospace; }
+.hint-line {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  color: #7c4a03;
+  font: 12px/1.5 system-ui, sans-serif;
+}
+.hint-line .q-icon { font-size: 16px; flex: none; margin-top: 1px; color: #b8860b; }
 
 .setup-intro {
   margin: 0 0 12px;
