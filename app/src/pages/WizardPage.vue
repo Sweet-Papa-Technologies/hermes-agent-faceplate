@@ -35,6 +35,17 @@
         </p>
 
         <q-input v-model="hermesUrl" label="Gateway URL" filled stack-label hint="e.g. http://127.0.0.1:8642/v1" />
+        <q-select
+          v-if="candidateOptions.length"
+          v-model="selectedCandidateUrl"
+          class="q-mt-sm"
+          :options="candidateOptions"
+          label="Hermes connection options"
+          filled
+          emit-value
+          map-options
+          @update:model-value="selectCandidate"
+        />
         <q-input
           v-model="hermesKey"
           class="q-mt-sm"
@@ -140,7 +151,7 @@ import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useSetting } from '../composables/use-setting';
 import { useSettingsStore } from '../stores/settings';
 import { useDiscoveryStore } from '../stores/discovery';
-import type { SidecarStatus } from '../../src-electron/preload-api';
+import type { HermesConnectionCandidate, SidecarStatus } from '../../src-electron/preload-api';
 
 const step = ref<number>(0);
 const settings = useSettingsStore();
@@ -158,6 +169,23 @@ const wizardStep = useSetting('wizard.last_step');
 
 const showKey = ref(false);
 const showSidecarToken = ref(false);
+const selectedCandidateUrl = ref<string | null>(null);
+
+const candidateOptions = computed(() => (discovery.discovery?.candidates ?? []).map((candidate) => ({
+  label: `${candidate.reachable ? 'Reachable' : 'Found'} — ${candidate.label} (${candidate.base_url})`,
+  value: candidate.base_url,
+})));
+
+async function selectCandidate(url: string | null): Promise<void> {
+  if (!url) return;
+  const candidate: HermesConnectionCandidate | undefined = discovery.discovery?.candidates.find(
+    (item) => item.base_url === url,
+  );
+  if (!candidate) return;
+  hermesUrl.value = candidate.base_url;
+  if (candidate.api_key) hermesKey.value = candidate.api_key;
+  await discovery.refresh();
+}
 
 // Voice mode unifies the master speech.enabled toggle with input.mode so the
 // wizard offers a single tidy radio. 'off' → speech.enabled=false (no TTS,
@@ -234,6 +262,11 @@ async function finish(): Promise<void> {
 
 onMounted(async () => {
   if (!discovery.discovery) await discovery.refresh();
+  const reachable = discovery.discovery?.candidates.find((candidate) => candidate.reachable);
+  if (reachable && !discovery.discovery?.reachable) {
+    selectedCandidateUrl.value = reachable.base_url;
+    await selectCandidate(reachable.base_url);
+  }
   // Clamp any persisted step from an older wizard (which had more steps).
   step.value = Math.min(settings.settings.wizard.last_step ?? 0, 2);
 });
