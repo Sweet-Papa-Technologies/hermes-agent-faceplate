@@ -18,6 +18,12 @@ ehthumbs.db
 *.sln
 .aider*
 
+# Python
+__pycache__
+*.pyc
+*.egg-info
+
 # Local env overrides
+.env
 .env.local
 .env.local.*
